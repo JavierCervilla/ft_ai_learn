@@ -19,5 +19,18 @@ deno run -A --node-modules-dir=none db/migrate.ts
 echo "[arranque] cargando el contenido del grafo…"
 deno run -A --node-modules-dir=none db/cargar.ts
 
+# La primera invitación del círculo. Sólo hace algo si `BOOTSTRAP_EMAIL` está puesto Y no hay ningún
+# usuario todavía: la tarea se niega sola en cuanto alguien entra, así que esto es idempotente y se
+# cierra para siempre con la primera cuenta. No abre ninguna superficie de red — el código va al log
+# del contenedor, que sólo lee quien ya tiene acceso de operador, o sea el mismo que haría falta para
+# ejecutar la tarea a mano.
+#
+# `|| true` porque el «ya hay usuarios» es una salida 1 legítima y `set -e` mataría el arranque.
+if [ -n "${BOOTSTRAP_EMAIL:-}" ]; then
+  echo "[arranque] comprobando si hace falta la primera invitación (para ${BOOTSTRAP_EMAIL})…"
+  deno run -A tools/invitar-bootstrap.ts "${BOOTSTRAP_EMAIL}" 2>&1 \
+    | sed 's/^/[arranque][invitación] /' || true
+fi
+
 echo "[arranque] sirviendo en :${PORT:-8000}"
 exec deno run -A server/src/main.ts

@@ -223,6 +223,17 @@ export const userProgress = pgTable("user_progress", {
  */
 export const invitation = pgTable("invitation", {
   code: text("code").primaryKey(),
+  /**
+   * A quién va dirigida. **`NULL` = al portador**: vale para quien traiga el código, que es como
+   * nacieron las invitaciones. Con email, **sólo esa persona puede consumirla**.
+   *
+   * Existe porque un vale al portador no se puede entregar por un canal que quede escrito: quien lo
+   * lea primero se queda la cuenta. Ligarla a una persona hace el código inofensivo para cualquier
+   * otro, y de paso es la semántica que pedía un círculo cerrado — se invita a alguien, no se emite
+   * un vale. Sin índice único: dos invitaciones al mismo email son legítimas (una se revoca, se
+   * emite otra).
+   */
+  email: text("email"),
   inviterId: text("inviter_id").references(() => user.id, {
     onDelete: "cascade",
   }),

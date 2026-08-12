@@ -11,7 +11,11 @@ import { generarCodigo } from "@ftai/server-invitaciones";
  * **se niega a correr si ya hay alguien**: una vez existe el círculo, la puerta de servicio no vuelve
  * a abrirse.
  *
- *   deno task invitar:bootstrap
+ * Acepta un **email opcional**: con él la invitación es nominal y sólo la puede usar esa persona, que
+ * es lo que permite entregar el código por un canal que quede escrito sin regalarle la primera cuenta
+ * a quien lo lea antes. Sin email, sigue siendo al portador.
+ *
+ *   deno task invitar:bootstrap [email]
  */
 
 const urlDb = Deno.env.get("DATABASE_URL");
@@ -33,8 +37,10 @@ try {
     Deno.exit(1);
   }
 
+  const email = Deno.args[0]?.trim() || null;
   const codigo = generarCodigo();
-  await sql`insert into invitation (code, inviter_id) values (${codigo}, null)`;
+  await sql`insert into invitation (code, inviter_id, email) values (${codigo}, null, ${email})`;
+  if (email) console.error(`(invitación nominal: sólo la puede usar ${email})`);
 
   // Se imprime porque es la única vez que se puede ver, y porque quien lanza esta tarea es quien va
   // a usarlo. No es un secreto de larga vida: se gasta en el primer registro.
