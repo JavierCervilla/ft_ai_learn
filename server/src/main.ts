@@ -66,7 +66,7 @@ router.get("/api/graph", async (ctx) => {
 });
 
 // Identidad, progreso e invitaciones. Todo lo que tiene dueño vive ahí, y saca al dueño de la sesión.
-montarRutas(router, { sql, auth, leerGrafo: () => leerGrafo(sql) });
+montarRutas(router, { sql, auth, baseUrl: BASE_URL, leerGrafo: () => leerGrafo(sql) });
 
 const app = new Application();
 app.use(router.routes());

@@ -271,6 +271,28 @@ jobs:
       - name: Escaneo de secretos
         run: gitleaks detect --config .security-gate-presets/gitleaks.toml --no-banner --redact --verbose
 
+      # Los dos peldaños de abajo FALTABAN pese a que el nombre del job los anunciaba: sólo corría
+      # gitleaks, y el preset de semgrep llevaba desde FTAI-B en disco sin que nadie lo invocara. Lo
+      # cazó el pase de rol `seguridad` en FTAI-D — precisamente el PR que mete tres dependencias
+      # nuevas (better-auth, drizzle-orm, @noble/hashes) en el camino de la contraseña.
+      - name: Instalar semgrep y osv-scanner
+        run: |
+          pipx install semgrep
+          curl -sSL -o /usr/local/bin/osv-scanner \
+            https://github.com/google/osv-scanner/releases/download/v2.2.4/osv-scanner_linux_amd64
+          chmod +x /usr/local/bin/osv-scanner
+
+      # Ruleset VENDORIZADO y pinneado, nunca el registry (`p/…`/`auto`): el veredicto tiene que ser
+      # reproducible sin red y sin que nadie de fuera pueda cambiar lo que nos bloquea.
+      - name: SAST (semgrep, ruleset vendorizado)
+        run: semgrep --config .security-gate-presets/semgrep --metrics=off --error --quiet .
+
+      - name: CVE de dependencias (osv-scanner)
+        run: osv-scanner scan source --lockfile=deno.lock --lockfile=webapp/package-lock.json .
+
+      - name: CVE de dependencias (npm audit, high+)
+        run: npm audit --audit-level=high --prefix webapp
+
   qa:
     name: QA · smoke de UI [informativo]
     runs-on: ubuntu-latest

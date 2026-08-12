@@ -32,14 +32,26 @@ export interface ResultadoRegistro {
   cookies: string[];
 }
 
-/** Lo que se le dice a quien trae un código que no vale. Nunca por qué: eso ayudaría a sondearlos. */
-const INVITACION_NO_VALIDA = { error: "invitación no válida" };
+/**
+ * **La única respuesta a un alta fallida, sea cual sea el motivo.**
+ *
+ * Antes se distinguía «código no válido» (403) de «ese email ya tiene cuenta» (422, que venía de la
+ * librería). El pase de rol `seguridad` demostró que eso es un **oráculo de pertenencia**: con un solo
+ * código válido disparó doce sondas seguidas contra el mismo email y obtuvo doce `422` **sin gastar el
+ * código**, porque un alta fallida lo libera. Cualquiera con una invitación podía preguntar
+ * indefinidamente «¿está fulano en el círculo?».
+ *
+ * En un producto cuya premisa de privacidad **es** el círculo cerrado, la pertenencia es el dato que
+ * hay que proteger, y §12.4 pide justamente errores que no distingan. Ahora el único desenlace
+ * distinguible es el éxito, y ése **gasta el código**: como mucho un bit por invitación.
+ */
+const ALTA_RECHAZADA = { error: "no se pudo completar el alta" };
 
 export async function registrar(
   { sql, auth, peticion }: { sql: Sql; auth: Auth; peticion: PeticionRegistro },
 ): Promise<ResultadoRegistro> {
   const codigo = await consumir(sql, peticion.inviteCode ?? "");
-  if (!codigo) return { estado: 403, cuerpo: INVITACION_NO_VALIDA, cookies: [] };
+  if (!codigo) return { estado: 403, cuerpo: ALTA_RECHAZADA, cookies: [] };
 
   let respuesta: Response;
   try {
@@ -53,14 +65,12 @@ export async function registrar(
   }
 
   if (!respuesta.ok) {
+    // El código se libera para no castigar a quien se equivoca (una contraseña corta no debe quemar
+    // la invitación de nadie), y la respuesta se aplana al mismo 403 **sin leer el motivo de la
+    // librería**: es ahí donde se escapaba el `USER_ALREADY_EXISTS` que delataba a los miembros.
     await liberar(sql, codigo);
-    return {
-      estado: respuesta.status,
-      cuerpo: await respuesta.json().catch(() => ({
-        error: "no se pudo crear la cuenta",
-      })) as Record<string, unknown>,
-      cookies: [],
-    };
+    await respuesta.body?.cancel();
+    return { estado: 403, cuerpo: ALTA_RECHAZADA, cookies: [] };
   }
 
   const creado = await respuesta.json() as Record<string, unknown> & { user?: { id?: string } };

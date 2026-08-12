@@ -17,11 +17,45 @@ import { registrar } from "./registro.ts";
 /** Respuesta única para «no existe» y «no es tuyo», que no se distinguen a propósito (§12.4). */
 const NO_ENCONTRADO = { error: "no encontrado" };
 
-async function exigirSesion(auth: Auth, ctx: Context): Promise<string | null> {
+/** Métodos que cambian estado y por tanto exigen `Origin` propio (los de lectura no lo necesitan). */
+const METODOS_MUTANTES = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/**
+ * Comprueba que una petición que cambia estado viene de nuestro propio origen.
+ *
+ * Better Auth trae esto para sus rutas, pero **las nuestras no pasan por su handler**. La primera
+ * versión se apoyaba sólo en que la cookie es `SameSite`, y el pase de rol `seguridad` señaló el
+ * error: **`SameSite` es por *sitio*, no por origen**. `ftai.srcpad.pro` convive con las demás apps
+ * del enjambre bajo `srcpad.pro`, así que un XSS o un subdominio tomado en cualquier hermana forja
+ * peticiones autenticadas contra esta API y el navegador **sí** manda la cookie. Medido: un `PUT` con
+ * cookie válida y `Origin: https://evil.example` respondía 200.
+ */
+function origenPropio(ctx: Context, baseUrl: string): boolean {
+  if (!METODOS_MUTANTES.has(ctx.request.method)) return true;
+  const origen = ctx.request.headers.get("origin");
+  // Sin `Origin` se rechaza: un navegador lo manda siempre en una petición que cambia estado, así que
+  // su ausencia es o un cliente que no es un navegador o justo el ataque que esto viene a parar.
+  if (!origen) return false;
+  return origen === new URL(baseUrl).origin;
+}
+
+async function exigirSesion(
+  auth: Auth,
+  ctx: Context,
+  baseUrl: string,
+): Promise<string | null> {
   const userId = await usuarioDe(auth, ctx.request.headers);
   if (!userId) {
     ctx.response.status = 401;
     ctx.response.body = { error: "hace falta iniciar sesión" };
+    return null;
+  }
+  // El origen se mira DESPUÉS de la sesión, y el orden importa para lo que significa cada código: una
+  // petición sin sesión no puede hacer daño venga de donde venga, así que sigue siendo un 401 honesto.
+  // El CSRF sólo es un problema cuando **sí** hay cookie, y ese caso es el que cae aquí.
+  if (!origenPropio(ctx, baseUrl)) {
+    ctx.response.status = 403;
+    ctx.response.body = { error: "origen no permitido" };
     return null;
   }
   return userId;
@@ -44,11 +78,13 @@ async function volcar(ctx: Context, respuesta: Response): Promise<void> {
 export interface DepsRutas {
   sql: Sql;
   auth: Auth;
+  /** Origen canónico de la app: lo que tiene que traer un `Origin` para que se le crea. */
+  baseUrl: string;
   /** El grafo se lee por petición: el contenido puede recargarse sin reiniciar el servidor. */
   leerGrafo: () => Promise<Grafo>;
 }
 
-export function montarRutas(router: Router, { sql, auth, leerGrafo }: DepsRutas): void {
+export function montarRutas(router: Router, { sql, auth, baseUrl, leerGrafo }: DepsRutas): void {
   // --- Identidad ---------------------------------------------------------------------------------
 
   /**
@@ -102,13 +138,13 @@ export function montarRutas(router: Router, { sql, auth, leerGrafo }: DepsRutas)
   // --- Progreso ----------------------------------------------------------------------------------
 
   router.get("/api/progress", async (ctx) => {
-    const userId = await exigirSesion(auth, ctx);
+    const userId = await exigirSesion(auth, ctx, baseUrl);
     if (!userId) return;
     ctx.response.body = await vistaDe(sql, userId, await leerGrafo());
   });
 
   router.put("/api/progress/:nodeId", async (ctx) => {
-    const userId = await exigirSesion(auth, ctx);
+    const userId = await exigirSesion(auth, ctx, baseUrl);
     if (!userId) return;
 
     const cuerpo = await ctx.request.body.json().catch(() => null) as { state?: string } | null;
@@ -139,7 +175,7 @@ export function montarRutas(router: Router, { sql, auth, leerGrafo }: DepsRutas)
   // --- Invitaciones ------------------------------------------------------------------------------
 
   router.get("/api/invitations", async (ctx) => {
-    const userId = await exigirSesion(auth, ctx);
+    const userId = await exigirSesion(auth, ctx, baseUrl);
     if (!userId) return;
     ctx.response.body = {
       cupo: await cupoDe(sql, userId),
@@ -148,7 +184,7 @@ export function montarRutas(router: Router, { sql, auth, leerGrafo }: DepsRutas)
   });
 
   router.post("/api/invitations", async (ctx) => {
-    const userId = await exigirSesion(auth, ctx);
+    const userId = await exigirSesion(auth, ctx, baseUrl);
     if (!userId) return;
     const invitacion = await emitir(sql, userId);
     if (!invitacion) {
@@ -161,7 +197,7 @@ export function montarRutas(router: Router, { sql, auth, leerGrafo }: DepsRutas)
   });
 
   router.delete("/api/invitations/:code", async (ctx) => {
-    const userId = await exigirSesion(auth, ctx);
+    const userId = await exigirSesion(auth, ctx, baseUrl);
     if (!userId) return;
     // `revocar` mete el `inviter_id` en el `WHERE`: revocar la de otro no falla por permisos, es que
     // no encuentra fila. Por eso la respuesta es la misma que para un código inexistente.

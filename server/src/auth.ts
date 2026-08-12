@@ -67,6 +67,20 @@ export function crearAuth({ sql, secreto, baseUrl }: OpcionesAuth) {
       password: { hash, verify },
     },
     advanced: { useSecureCookies: cookiesSeguras(baseUrl) },
+    /**
+     * Límite de intentos, **explícito y no heredado del entorno**.
+     *
+     * Better Auth sólo enciende su rate limiter cuando `NODE_ENV === "production"`, y nuestro
+     * contenedor no fija esa variable. El pase de rol `seguridad` lo midió contra el binario real:
+     * 25 de 25 `sign-in` fallidos devolvían 401 sin un solo 429. Es un oráculo de contraseñas sin
+     * límite, y además caro de servir — cada intento cuesta los 19 MiB de Argon2, así que la propia
+     * defensa de la contraseña se convierte en el vector barato de agotar memoria.
+     *
+     * Se activa aquí y no con `ENV NODE_ENV=production` en el `Dockerfile` a propósito: una
+     * protección que depende de una variable de ambiente es una protección que desaparece sin que
+     * cambie una línea de código, y que no se ve leyendo este fichero.
+     */
+    rateLimit: { enabled: true, window: 60, max: 20 },
   });
 }
 
