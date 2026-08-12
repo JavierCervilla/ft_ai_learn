@@ -2,6 +2,9 @@ node_modules/
 dist/
 *.local
 
+# `db/` pide nodeModulesDir=auto porque drizzle-kit necesita un node_modules real (ver db/deno.json)
+db/node_modules/
+
 # Secretos: nunca en el repo (spec §12). Sólo por entorno.
 .env
 .env.*

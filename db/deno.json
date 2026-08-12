@@ -1,0 +1,17 @@
+{
+  "//": "FUERA del workspace de la raíz a propósito. `drizzle-kit` necesita un node_modules real —con sólo especificadores npm: falla con «Please install latest version of drizzle-orm», verificado en FTAI-B— y `nodeModulesDir` sólo se puede declarar en la raíz de un workspace. Meter db/ dentro obligaría a crear node_modules también para core/ y server/, que no lo necesitan. El precio es este aviso de Deno al ignorar la config padre.",
+  "nodeModulesDir": "auto",
+  "imports": {
+    "drizzle-orm": "npm:drizzle-orm@^0.44.0",
+    "drizzle-orm/": "npm:/drizzle-orm@^0.44.0/",
+    "drizzle-kit": "npm:drizzle-kit@^0.31.0",
+    "postgres": "npm:postgres@^3.4.5"
+  },
+  "tasks": {
+    "//": "`push` NUNCA: escribe contra la base sin dejar SQL que revisar en el PR.",
+    "check": "deno check migrate.ts schema.ts drizzle.config.ts",
+    "lint": "deno lint migrate.ts schema.ts drizzle.config.ts",
+    "generate": "deno run -A npm:drizzle-kit@^0.31.0 generate",
+    "migrate": "deno run -A migrate.ts"
+  }
+}

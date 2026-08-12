@@ -1,0 +1,12 @@
+{
+  "name": "@ftai/server",
+  "version": "0.1.0",
+  "exports": "./src/main.ts",
+  "imports": {
+    "@oak/oak": "jsr:@oak/oak@^17.1.4",
+    "postgres": "npm:postgres@^3.4.5"
+  },
+  "tasks": {
+    "dev": "deno run -A --watch src/main.ts"
+  }
+}
