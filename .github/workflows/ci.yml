@@ -112,6 +112,10 @@ jobs:
           --health-interval 3s --health-timeout 3s --health-retries 20
     env:
       DATABASE_URL: postgres://ftai:devpass@localhost:5432/ftai_ci
+      # El servidor se niega a arrancar sin secreto de sesión (ver `leerSecreto`). Éste es de CI y
+      # sólo vive aquí: la base se tira al acabar el job y no hay nada que rotar.
+      BETTER_AUTH_SECRET: secreto-de-ci-de-treinta-y-dos-o-mas-caracteres
+      BASE_URL: http://localhost:8000
     steps:
       - uses: actions/checkout@v5
       - uses: denoland/setup-deno@v2
@@ -184,6 +188,71 @@ jobs:
           "
           kill %1
 
+      # Las dos sondas corren contra el servidor de verdad, con su base y su contenido. Es el gate de
+      # V7 (nadie alcanza lo ajeno) y de D3-D6 (cupo, consumo único, idempotencia, desbloqueo). No se
+      # hacen con mocks a propósito: lo que se prueba es la composición —sesión, router, consultas—.
+      - name: Sondas de autorización (V7) y de reglas (D3-D6)
+        run: |
+          deno run -A server/src/main.ts &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8000/health && break || sleep 1; done
+
+          # El código del bootstrap es de un solo uso, así que cada sonda estrena base: se vacían las
+          # tablas de identidad entre las dos y se acuña uno nuevo. Es más honesto que hacer que las
+          # sondas compartan usuario, que las acoplaría entre sí.
+          CODIGO_BOOTSTRAP=$(deno task invitar:bootstrap | tail -1) \
+            deno run -A tools/sonda-autorizacion.ts
+
+          deno eval "
+            const p = (await import('npm:postgres@3.4.5')).default(Deno.env.get('DATABASE_URL'));
+            await p\`truncate user_progress, invitation, user_invite_quota, session, account, \"user\" cascade\`;
+            await p.end();
+          "
+          CODIGO_BOOTSTRAP=$(deno task invitar:bootstrap | tail -1) \
+            deno run -A tools/sonda-reglas.ts
+
+          kill %1
+
+      # Trinquete del pase adversario: los dos recorridos que un día estuvieron en ROJO se quedan como
+      # gate permanente. No comprueban una feature, comprueban que **dos bugs concretos no vuelven**,
+      # y por eso valen más que un test escrito a priori: nacieron de una rotura reproducida.
+      - name: Trinquete adversario · los hallazgos de qa-adversario siguen cerrados
+        run: |
+          deno run -A server/src/main.ts &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8000/health && break || sleep 1; done
+
+          deno eval "
+            const p = (await import('npm:postgres@3.4.5')).default(Deno.env.get('DATABASE_URL'));
+            await p\`truncate user_progress, invitation, user_invite_quota, session, account, \"user\" cascade\`;
+            await p.end();
+          "
+          # F1 es determinista y no necesita sesión.
+          deno test -A tests/e2e/journeys/adversarial/a6-registro-500-tipo-hostil.spec.ts
+
+          # F2 es una carrera: necesita un host con sesión y cupo de sobra para hammerearla.
+          CODIGO=$(deno task invitar:bootstrap | tail -1)
+          COOKIE=$(curl -s -D- -o /dev/null -X POST http://localhost:8000/api/registro \
+            -H 'content-type: application/json' -H 'origin: http://localhost:8000' \
+            -d "{\"email\":\"trinquete@ejemplo.test\",\"password\":\"contrasena-larga-de-prueba\",\"name\":\"T\",\"inviteCode\":\"$CODIGO\"}" \
+            | grep -i '^set-cookie' | sed 's/^[Ss]et-[Cc]ookie: //' | cut -d';' -f1)
+          deno eval "
+            const p = (await import('npm:postgres@3.4.5')).default(Deno.env.get('DATABASE_URL'));
+            await p\`update user_invite_quota set remaining = 5000\`;
+            await p.end();
+          "
+          COOKIE_HOST="$COOKIE" RONDAS=150 PARALELO=16 \
+            deno test -A tests/e2e/journeys/adversarial/a1-revocacion-derrotada-por-carrera.spec.ts
+
+          kill %1
+
+      - name: El bootstrap se cierra en cuanto hay alguien
+        run: |
+          # La puerta de servicio no se puede volver a abrir: si esto dejara de fallar, cualquiera con
+          # acceso al contenedor podría acuñarse una invitación con el círculo ya montado.
+          if deno task invitar:bootstrap > /tmp/boot.txt 2>&1; then
+            echo "el bootstrap debería haberse negado y acuñó: $(cat /tmp/boot.txt)"; exit 1
+          fi
+          grep -q "no vuelve a abrirse" /tmp/boot.txt
+
   webapp:
     name: Webapp · tsc + anti-slop + build + PWA
     runs-on: ubuntu-latest
@@ -226,6 +295,9 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.9.5"
       - name: Instalar gitleaks
         run: |
           curl -sSL -o /tmp/gitleaks.tar.gz \
@@ -233,6 +305,35 @@ jobs:
           tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
       - name: Escaneo de secretos
         run: gitleaks detect --config .security-gate-presets/gitleaks.toml --no-banner --redact --verbose
+
+      # Los dos peldaños de abajo FALTABAN pese a que el nombre del job los anunciaba: sólo corría
+      # gitleaks, y el preset de semgrep llevaba desde FTAI-B en disco sin que nadie lo invocara. Lo
+      # cazó el pase de rol `seguridad` en FTAI-D — precisamente el PR que mete tres dependencias
+      # nuevas (better-auth, drizzle-orm, @noble/hashes) en el camino de la contraseña.
+      - name: Instalar semgrep y osv-scanner
+        run: |
+          pipx install semgrep
+          curl -sSL -o /usr/local/bin/osv-scanner \
+            https://github.com/google/osv-scanner/releases/download/v2.2.4/osv-scanner_linux_amd64
+          chmod +x /usr/local/bin/osv-scanner
+
+      # Ruleset VENDORIZADO y pinneado, nunca el registry (`p/…`/`auto`): el veredicto tiene que ser
+      # reproducible sin red y sin que nadie de fuera pueda cambiar lo que nos bloquea.
+      - name: SAST (semgrep, ruleset vendorizado)
+        run: semgrep --config .security-gate-presets/semgrep --metrics=off --error --quiet .
+
+      # `osv-scanner` cubre SÓLO la webapp: no sabe leer `deno.lock` («could not determine extractor
+      # suitable to this file»), así que pasárselo no es que no aporte, es que rompe el paso. El lado
+      # del servidor lo cubre `tools/cve-deno.ts` contra la misma base de OSV — y hace falta, porque
+      # ahí es donde viven better-auth, drizzle-orm y @noble/hashes.
+      - name: CVE de dependencias · webapp (osv-scanner)
+        run: osv-scanner scan source -L webapp/package-lock.json
+
+      - name: CVE de dependencias · webapp (npm audit, high+)
+        run: npm audit --audit-level=high --prefix webapp
+
+      - name: CVE de dependencias · servidor y migraciones (OSV sobre deno.lock)
+        run: deno run -A tools/cve-deno.ts
 
   qa:
     name: QA · smoke de UI [informativo]

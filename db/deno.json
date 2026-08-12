@@ -2,19 +2,23 @@
   "//": "FUERA del workspace de la raíz a propósito. `drizzle-kit` necesita un node_modules real —con sólo especificadores npm: falla con «Please install latest version of drizzle-orm», verificado en FTAI-B— y `nodeModulesDir` sólo se puede declarar en la raíz de un workspace. Meter db/ dentro obligaría a crear node_modules también para core/ y server/, que no lo necesitan. El precio es un aviso de Deno al ignorar la config padre. Y como está fuera, el núcleo entra por RUTA RELATIVA (`@ftai/core` → ../core/src/mod.ts): es el mismo fichero que importan server/ y webapp/, un solo núcleo con tres adaptadores.",
   "nodeModulesDir": "auto",
   "imports": {
-    "drizzle-orm": "npm:drizzle-orm@^0.44.0",
-    "drizzle-orm/": "npm:/drizzle-orm@^0.44.0/",
+    "drizzle-orm": "npm:drizzle-orm@^0.45.2",
+    "drizzle-orm/": "npm:/drizzle-orm@^0.45.2/",
     "drizzle-kit": "npm:drizzle-kit@^0.31.0",
     "postgres": "npm:postgres@^3.4.5",
     "@std/yaml": "jsr:@std/yaml@^1.0.5",
-    "@ftai/core": "../core/src/mod.ts"
+    "@ftai/core": "../core/src/mod.ts",
+    "better-auth": "npm:better-auth@^1.6.26",
+    "better-auth/": "npm:/better-auth@^1.6.26/",
+    "@std/assert": "jsr:@std/assert@^1.0.8"
   },
   "tasks": {
     "//": "`push` NUNCA: escribe contra la base sin dejar SQL que revisar en el PR.",
-    "check": "deno check migrate.ts schema.ts drizzle.config.ts cargar.ts",
-    "lint": "deno lint migrate.ts schema.ts drizzle.config.ts cargar.ts",
+    "check": "deno check migrate.ts schema.ts drizzle.config.ts cargar.ts tests/",
+    "lint": "deno lint migrate.ts schema.ts drizzle.config.ts cargar.ts tests/",
     "generate": "deno run -A npm:drizzle-kit@^0.31.0 generate",
     "migrate": "deno run -A migrate.ts",
-    "cargar": "deno run -A cargar.ts"
+    "cargar": "deno run -A cargar.ts",
+    "test": "deno test -A tests/"
   }
 }

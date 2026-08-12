@@ -1,6 +1,8 @@
 import { Application, Router } from "@oak/oak";
+import { crearAuth, leerSecreto } from "./auth.ts";
 import { crearCliente, sondaDe } from "./db.ts";
 import { leerGrafo } from "./grafo.ts";
+import { montarRutas } from "./rutas.ts";
 import { salud } from "./salud.ts";
 
 /**
@@ -24,6 +26,22 @@ if (!urlDb) {
 const sql = crearCliente(urlDb);
 const sonda = sondaDe(sql);
 
+// `BASE_URL` decide, entre otras cosas, si la cookie de sesión lleva `Secure`. Por defecto la de
+// producción: si algún día falta la variable, el fallo es que no hay login en un dev local por HTTP,
+// no que la sesión viaje en claro de cara al público.
+const BASE_URL = Deno.env.get("BASE_URL") ?? "https://ftai.srcpad.pro";
+
+// El secreto se lee aquí y no dentro de `crearAuth` para que un despliegue sin configurar muera con
+// una línea legible en el log, igual que `DATABASE_URL`, y no con una traza de pila.
+let secretoSesion: string;
+try {
+  secretoSesion = leerSecreto(Deno.env);
+} catch (e) {
+  console.error(e instanceof Error ? e.message : String(e));
+  Deno.exit(2);
+}
+const auth = crearAuth({ sql, secreto: secretoSesion, baseUrl: BASE_URL });
+
 const router = new Router();
 router.get("/health", async (ctx) => {
   const estado = await salud(sonda, VERSION);
@@ -46,6 +64,9 @@ router.get("/health", async (ctx) => {
 router.get("/api/graph", async (ctx) => {
   ctx.response.body = await leerGrafo(sql);
 });
+
+// Identidad, progreso e invitaciones. Todo lo que tiene dueño vive ahí, y saca al dueño de la sesión.
+montarRutas(router, { sql, auth, baseUrl: BASE_URL, leerGrafo: () => leerGrafo(sql) });
 
 const app = new Application();
 app.use(router.routes());
