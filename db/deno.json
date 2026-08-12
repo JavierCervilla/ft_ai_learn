@@ -7,14 +7,18 @@
     "drizzle-kit": "npm:drizzle-kit@^0.31.0",
     "postgres": "npm:postgres@^3.4.5",
     "@std/yaml": "jsr:@std/yaml@^1.0.5",
-    "@ftai/core": "../core/src/mod.ts"
+    "@ftai/core": "../core/src/mod.ts",
+    "better-auth": "npm:better-auth@^1.6.26",
+    "better-auth/": "npm:/better-auth@^1.6.26/",
+    "@std/assert": "jsr:@std/assert@^1.0.8"
   },
   "tasks": {
     "//": "`push` NUNCA: escribe contra la base sin dejar SQL que revisar en el PR.",
-    "check": "deno check migrate.ts schema.ts drizzle.config.ts cargar.ts",
-    "lint": "deno lint migrate.ts schema.ts drizzle.config.ts cargar.ts",
+    "check": "deno check migrate.ts schema.ts drizzle.config.ts cargar.ts tests/",
+    "lint": "deno lint migrate.ts schema.ts drizzle.config.ts cargar.ts tests/",
     "generate": "deno run -A npm:drizzle-kit@^0.31.0 generate",
     "migrate": "deno run -A migrate.ts",
-    "cargar": "deno run -A cargar.ts"
+    "cargar": "deno run -A cargar.ts",
+    "test": "deno test -A tests/"
   }
 }

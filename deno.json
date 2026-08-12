@@ -16,13 +16,14 @@
     "check": "deno check core server tools && deno task --cwd db check",
     "lint": "deno lint core server tools && deno task --cwd db lint",
     "fmt": "deno fmt --check core server tools db",
-    "test": "deno test -A core server tools",
+    "test": "deno test -A core server tools && deno task --cwd db test",
     "dev": "deno run -A --watch server/src/main.ts",
     "db:generate": "deno task --cwd db generate",
     "db:migrate": "deno task --cwd db migrate",
     "contenido:cargar": "deno task --cwd db cargar",
     "contenido:validar": "deno run -A tools/validar-contenido.ts",
-    "contenido:enlaces": "deno run -A tools/verificar-enlaces.ts"
+    "contenido:enlaces": "deno run -A tools/verificar-enlaces.ts",
+    "invitar:bootstrap": "deno run -A tools/invitar-bootstrap.ts"
   },
   "fmt": {
     "lineWidth": 100,

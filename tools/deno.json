@@ -4,6 +4,8 @@
   "exports": "./contenido.ts",
   "imports": {
     "@std/yaml": "jsr:@std/yaml@^1.0.5",
-    "@ftai/core": "../core/src/mod.ts"
+    "@ftai/core": "../core/src/mod.ts",
+    "postgres": "npm:postgres@^3.4.5",
+    "@ftai/server-invitaciones": "../server/src/invitaciones.ts"
   }
 }

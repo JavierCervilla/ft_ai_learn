@@ -5,7 +5,12 @@
   "imports": {
     "@oak/oak": "jsr:@oak/oak@^17.1.4",
     "postgres": "npm:postgres@^3.4.5",
-    "@ftai/core": "../core/src/mod.ts"
+    "@ftai/core": "../core/src/mod.ts",
+    "better-auth": "npm:better-auth@^1.6.26",
+    "better-auth/": "npm:/better-auth@^1.6.26/",
+    "drizzle-orm/": "npm:/drizzle-orm@^0.44.0/",
+    "@noble/hashes/": "npm:/@noble/hashes@^2.3.0/",
+    "@ftai/esquema": "../db/schema.ts"
   },
   "tasks": {
     "dev": "deno run -A --watch src/main.ts"
