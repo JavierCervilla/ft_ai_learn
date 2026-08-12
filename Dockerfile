@@ -18,11 +18,14 @@ COPY deno.json deno.lock* ./
 COPY core ./core
 COPY server ./server
 COPY db ./db
+COPY tools ./tools
+COPY content ./content
 COPY --from=webapp /build/webapp/dist ./webapp/dist
 
 # Precalentar la caché de módulos en build: si una dependencia no se puede resolver, es mejor
 # enterarse aquí que en el primer arranque en producción.
-RUN deno cache server/src/main.ts && deno cache --node-modules-dir=none db/migrate.ts
+RUN deno cache server/src/main.ts \
+  && deno cache --node-modules-dir=none db/migrate.ts db/cargar.ts
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 

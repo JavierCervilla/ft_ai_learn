@@ -1,0 +1,184 @@
+# Fase 0 del Holy Graph — entorno listo, Git como portfolio, primer notebook que corre.
+#
+# El FORMATO de este fichero y las 14 reglas duras que debe cumplir viven en el vault del framework:
+#   Contexto_Base_SRE/01_Espec_y_Contratos/contrato_grafo_aprendizaje.md
+# Aquí viven los NODOS. El contrato dice cómo se escribe uno; este repo tiene los que hay.
+#
+# Todas las URLs se comprobaron el 2026-08-12. El validador (`deno task contenido:validar`) exige las
+# reglas 1-8 y 10-14; que los enlaces resuelvan (regla 9) lo comprueba `contenido:enlaces`, que
+# necesita red.
+
+branches:
+  # Las seis ramas del círculo interior existen desde el día 1 para que el mapa se vea entero.
+  # Sólo `fundamentos` trae nodos; el resto son nodos-título (§9).
+  # Los `target` de las fases sin sembrar son PROVISIONALES: se fijan al sembrar su fase. Subirlos
+  # baja el radar de quien ya estudió, así que hacerlo es una decisión editorial (§5.1, pregunta A-4).
+  - id: fundamentos
+    name: "Fundamentos"
+    isSpecialization: false
+    axis: fundamentos
+    target: 12
+  - id: matematicas
+    name: "Matemáticas prácticas"
+    isSpecialization: false
+    axis: matematicas
+    target: 20          # provisional
+  - id: ml
+    name: "ML clásico"
+    isSpecialization: false
+    axis: ml
+    target: 30          # provisional
+  - id: dl
+    name: "Deep Learning"
+    isSpecialization: false
+    axis: dl
+    target: 40          # provisional
+  - id: llms
+    name: "LLMs e IA generativa"
+    isSpecialization: false
+    axis: llms
+    target: 40          # provisional
+  - id: mlops
+    name: "MLOps y despliegue"
+    isSpecialization: false
+    axis: mlops
+    target: 25          # provisional
+  - id: ingenieria_sw
+    name: "Ingeniería de software"
+    isSpecialization: false
+    axis: ingenieria_sw
+    target: 20          # provisional; es el eje transversal que alimentan casi todos los proyectos
+
+nodes:
+  - id: f0-entorno
+    title: "El entorno: Colab en cinco minutos"
+    summary: >
+      Abres un notebook en la nube, ejecutas una celda y guardas el resultado. Sin instalar nada.
+    type: concept
+    branch: fundamentos
+    difficulty: 1
+    estMinutes: 15
+    micro: "Abrir Colab, crear un notebook y ejecutar `print(sum(range(10)))`."
+    prerequisites: []
+    competencies: { fundamentos: 1 }
+    resources:
+      - id: colab
+        url: "https://colab.research.google.com/"
+        format: interactive
+        lang: en
+        minutes: 15
+        why: >
+          Quita de en medio la instalación, que es donde se abandona antes de empezar. GPU gratis
+          más adelante, sin cambiar de herramienta.
+
+  - id: f0-portfolio
+    title: "El repositorio que será tu portfolio"
+    summary: >
+      Creas `holy-graph-ia` con un README que documenta tu ruta. Cada nodo que cierres dejará
+      commits aquí, y esos commits son la evidencia que la app lee.
+    type: concept
+    branch: fundamentos
+    difficulty: 1
+    estMinutes: 30
+    micro: "Crear el repo y escribir el README con las cinco fases y dónde estás."
+    prerequisites: []
+    competencies: { fundamentos: 1, ingenieria_sw: 1 }
+    resources:
+      - id: gh-create-repo
+        url: "https://docs.github.com/en/get-started/quickstart/create-a-repo"
+        format: doc
+        lang: en
+        minutes: 15
+        why: >
+          La referencia oficial y corta. El repo importa porque la app lo usa como evidencia, no
+          porque haya que aprender Git.
+
+  - id: f0-python
+    title: "Python, repaso ejecutable"
+    summary: >
+      Recuperas fluidez en Python resolviendo ejercicios en el navegador, sin teoría de sobra.
+    type: concept
+    branch: fundamentos
+    difficulty: 2
+    estMinutes: 300
+    micro: "Una lección del curso al día."
+    extended: "Rehacer en Colab, de memoria, el ejercicio que más te costó."
+    prerequisites: [f0-entorno]
+    competencies: { fundamentos: 3 }
+    resources:
+      - id: kaggle-python
+        url: "https://www.kaggle.com/learn/python"
+        format: course
+        lang: en
+        minutes: 300
+        why: >
+          Está partido en lecciones que caben en una sentada y se ejecuta en el navegador: encaja
+          con la unidad de 15 minutos sin adaptarlo.
+    # Dato a confirmar al producir el cuaderno: número exacto de lecciones y duración oficial.
+    # Kaggle sirve la página por JavaScript y no se pudo leer desde el contenedor.
+
+  - id: f0-pandas-numpy
+    title: "NumPy y pandas, lo justo para empezar"
+    summary: >
+      Manejas arrays y DataFrames lo suficiente para cargar un CSV y hacerle preguntas.
+    type: concept
+    branch: fundamentos
+    difficulty: 2
+    estMinutes: 60
+    micro: "Un ultraquick tutorial (NumPy o pandas) de una sentada."
+    prerequisites: [f0-entorno]
+    competencies: { fundamentos: 2, matematicas: 1 }
+    resources:
+      - id: numpy-ultraquick
+        url: "https://colab.research.google.com/github/google/eng-edu/blob/main/ml/cc/exercises/numpy_ultraquick_tutorial.ipynb"
+        format: interactive
+        lang: en
+        minutes: 30
+        why: >
+          Notebook oficial de Google, ejecutable tal cual, cortado a la medida de lo que hace falta
+          para el curso de ML y ni un concepto más.
+      - id: pandas-ultraquick
+        url: "https://colab.research.google.com/github/google/eng-edu/blob/main/ml/cc/exercises/pandas_dataframe_ultraquick_tutorial.ipynb"
+        format: interactive
+        lang: en
+        minutes: 30
+        why: >
+          El compañero del anterior para DataFrames; es el vocabulario que usa el proyecto del nodo
+          siguiente.
+
+  - id: f0-hola-datos
+    title: "Hola, Datos"
+    summary: >
+      Cargas un CSV que te interese de verdad, lo exploras con pandas y cuentas algo con tres
+      gráficos. Es tu primer nodo-proyecto: se aprueba con evidencia, no marcándolo.
+    type: project
+    branch: fundamentos
+    difficulty: 2
+    estMinutes: 90
+    micro: "Cargar el CSV y mirar `head()`, `info()` y `describe()`."
+    extended: "Escribir el README: de dónde sale el dataset y qué preguntaste."
+    prerequisites: [f0-python, f0-pandas-numpy, f0-portfolio]
+    competencies: { fundamentos: 4, ingenieria_sw: 1 }
+    resources:
+      - id: kaggle-datasets
+        url: "https://www.kaggle.com/datasets"
+        format: doc
+        lang: en
+        minutes: 15
+        why: >
+          Para elegir un dataset que te importe. Que te importe no es un adorno: es lo que hace que
+          se te ocurran preguntas.
+    rubric:
+      - id: corre-entero
+        criterion: "El notebook corre de arriba abajo sin errores en un entorno limpio."
+        howToCheck: "Runtime → Restart and run all. Cero excepciones."
+      - id: tres-visualizaciones
+        criterion: "Hay al menos tres visualizaciones, y cada una responde a una pregunta escrita."
+        howToCheck: >
+          Contar las celdas con gráfico; cada una tiene encima una celda markdown con su pregunta.
+      - id: readme-dataset
+        criterion: "El README explica de dónde sale el dataset y qué querías averiguar."
+        howToCheck: "Abrir el README: nombra la fuente con enlace y al menos una pregunta."
+      - id: evidencia
+        criterion: "El trabajo está commiteado en el repo de portfolio."
+        howToCheck: "El notebook aparece en `holy-graph-ia` con al menos un commit tuyo."

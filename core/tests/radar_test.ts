@@ -94,7 +94,9 @@ Deno.test("añadir nodos al grafo NO baja el radar de nadie", () => {
   };
   const despues = radar(conFaseNueva, completados);
 
-  for (const [i, fila] of antes.entries()) {
-    assertEquals(despues[i].score >= fila.score, true, `bajó el eje ${fila.rama.axis}`);
+  for (const fila of antes) {
+    const posterior = despues.find((d) => d.rama.axis === fila.rama.axis);
+    assertEquals(posterior !== undefined, true, `desapareció el eje ${fila.rama.axis}`);
+    assertEquals(posterior!.score >= fila.score, true, `bajó el eje ${fila.rama.axis}`);
   }
 });

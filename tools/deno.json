@@ -1,0 +1,9 @@
+{
+  "name": "@ftai/tools",
+  "version": "0.1.0",
+  "exports": "./contenido.ts",
+  "imports": {
+    "@std/yaml": "jsr:@std/yaml@^1.0.5",
+    "@ftai/core": "../core/src/mod.ts"
+  }
+}

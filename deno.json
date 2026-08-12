@@ -1,24 +1,52 @@
 {
-  "workspace": ["./core", "./server"],
+  "workspace": [
+    "./core",
+    "./server",
+    "./tools"
+  ],
+  "//compilerOptions": "MISMA severidad que webapp/tsconfig.json. `noUncheckedIndexedAccess` no viene por defecto en Deno y sí está en la webapp: sin alinearlas, el núcleo compila aquí y falla allí, y la portabilidad sería verdad sólo en runtime. Se descubrió al probar V3.",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
   "tasks": {
     "//": "db/ se comprueba con su propia config: está fuera del workspace (ver db/deno.json) y desde aquí no se resuelve su mapa de importaciones.",
-    "check": "deno check core server && deno task --cwd db check",
-    "lint": "deno lint core server && deno task --cwd db lint",
-    "fmt": "deno fmt --check core server db",
-    "test": "deno test -A core server",
+    "check": "deno check core server tools && deno task --cwd db check",
+    "lint": "deno lint core server tools && deno task --cwd db lint",
+    "fmt": "deno fmt --check core server tools db",
+    "test": "deno test -A core server tools",
     "dev": "deno run -A --watch server/src/main.ts",
     "db:generate": "deno task --cwd db generate",
-    "db:migrate": "deno task --cwd db migrate"
+    "db:migrate": "deno task --cwd db migrate",
+    "contenido:cargar": "deno task --cwd db cargar",
+    "contenido:validar": "deno run -A tools/validar-contenido.ts",
+    "contenido:enlaces": "deno run -A tools/verificar-enlaces.ts"
   },
   "fmt": {
     "lineWidth": 100,
-    "exclude": ["webapp/", "db/migrations/", "db/node_modules/"]
+    "exclude": [
+      "webapp/",
+      "db/migrations/",
+      "db/node_modules/"
+    ]
   },
   "lint": {
     "rules": {
-      "tags": ["recommended"],
-      "include": ["no-sync-fn-in-async-fn", "no-throw-literal", "eqeqeq"]
+      "tags": [
+        "recommended"
+      ],
+      "include": [
+        "no-sync-fn-in-async-fn",
+        "no-throw-literal",
+        "eqeqeq"
+      ]
     }
   },
-  "exclude": ["webapp/", "db/node_modules/", "db/migrations/"]
+  "exclude": [
+    "webapp/",
+    "db/node_modules/",
+    "db/migrations/"
+  ]
 }

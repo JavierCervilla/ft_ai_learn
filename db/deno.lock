@@ -1,9 +1,15 @@
 {
   "version": "5",
   "specifiers": {
+    "jsr:@std/yaml@^1.0.5": "1.2.0",
     "npm:drizzle-kit@0.31": "0.31.10",
     "npm:drizzle-orm@0.44": "0.44.7_postgres@3.4.9",
     "npm:postgres@^3.4.5": "3.4.9"
+  },
+  "jsr": {
+    "@std/yaml@1.2.0": {
+      "integrity": "20beb41e4983ba3437dbefac62b14061ab058e8a187596f19d28ff9035f6e6cf"
+    }
   },
   "npm": {
     "@drizzle-team/brocli@0.10.2": {
@@ -552,9 +558,24 @@
   },
   "workspace": {
     "dependencies": [
+      "jsr:@std/yaml@^1.0.5",
       "npm:drizzle-kit@0.31",
       "npm:drizzle-orm@0.44",
       "npm:postgres@^3.4.5"
-    ]
+    ],
+    "links": {
+      "jsr:@ftai/core@0.1.0": {},
+      "jsr:@ftai/server@0.1.0": {
+        "dependencies": [
+          "jsr:@oak/oak@^17.1.4",
+          "npm:postgres@^3.4.5"
+        ]
+      },
+      "jsr:@ftai/tools@0.1.0": {
+        "dependencies": [
+          "jsr:@std/yaml@^1.0.5"
+        ]
+      }
+    }
   }
 }
