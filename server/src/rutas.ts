@@ -187,7 +187,14 @@ export function montarRutas(router: Router, { sql, auth, baseUrl, leerGrafo }: D
   router.post("/api/invitations", async (ctx) => {
     const userId = await exigirSesion(auth, ctx, baseUrl);
     if (!userId) return;
-    const invitacion = await emitir(sql, userId);
+    // `email` opcional: con él la invitación es **nominal** y sólo la puede usar esa persona; sin él
+    // sigue siendo al portador, como eran todas antes. Se valida que sea cadena por lo mismo que en
+    // el registro: el cuerpo es JSON de fuera y un booleano llegaría hasta el SQL.
+    const cuerpo = await ctx.request.body.json().catch(() => null) as
+      | Record<string, unknown>
+      | null;
+    const email = typeof cuerpo?.email === "string" && cuerpo.email !== "" ? cuerpo.email : null;
+    const invitacion = await emitir(sql, userId, email);
     if (!invitacion) {
       ctx.response.status = 409;
       ctx.response.body = { error: "sin cupo de invitaciones" };

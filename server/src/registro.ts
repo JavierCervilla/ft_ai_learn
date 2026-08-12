@@ -51,7 +51,7 @@ const ALTA_RECHAZADA = { error: "no se pudo completar el alta" };
 export async function registrar(
   { sql, auth, peticion }: { sql: Sql; auth: Auth; peticion: PeticionRegistro },
 ): Promise<ResultadoRegistro> {
-  const codigo = await consumir(sql, peticion.inviteCode);
+  const codigo = await consumir(sql, peticion.inviteCode, peticion.email);
   if (!codigo) return { estado: 403, cuerpo: ALTA_RECHAZADA, cookies: [] };
 
   let respuesta: Response;

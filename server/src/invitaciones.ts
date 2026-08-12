@@ -19,6 +19,8 @@ const BYTES_CODIGO = 16;
 
 export interface Invitacion {
   code: string;
+  /** A quién va dirigida. `null` = al portador. */
+  email: string | null;
   createdAt: Date;
   usedAt: Date | null;
   revokedAt: Date | null;
@@ -56,7 +58,11 @@ export async function darCupoInicial(sql: Sql, userId: string, cupo = CUPO_INICI
  * simultáneas con un cupo de 1 no pueden pasar las dos, porque la segunda no encuentra fila que
  * cumpla la condición. Leer el cupo y luego restarlo daría dos invitaciones por el precio de una.
  */
-export async function emitir(sql: Sql, userId: string): Promise<Invitacion | null> {
+export async function emitir(
+  sql: Sql,
+  userId: string,
+  email?: string | null,
+): Promise<Invitacion | null> {
   return await sql.begin(async (tx) => {
     const descontado = await tx<{ remaining: number }[]>`
       update user_invite_quota set remaining = remaining - 1
@@ -65,8 +71,9 @@ export async function emitir(sql: Sql, userId: string): Promise<Invitacion | nul
     if (descontado.length === 0) return null;
 
     const filas = await tx<Invitacion[]>`
-      insert into invitation (code, inviter_id) values (${generarCodigo()}, ${userId})
-      returning code, created_at as "createdAt", used_at as "usedAt",
+      insert into invitation (code, inviter_id, email)
+      values (${generarCodigo()}, ${userId}, ${email ?? null})
+      returning code, email, created_at as "createdAt", used_at as "usedAt",
                 revoked_at as "revokedAt", used_by_user_id as "usedByUserId"`;
     return filas[0] ?? null;
   }) as Invitacion | null;
@@ -105,7 +112,7 @@ export async function revocar(sql: Sql, userId: string, code: string): Promise<b
 /** Las invitaciones de alguien. Sólo las suyas: el `WHERE` no admite otra cosa. */
 export async function listar(sql: Sql, userId: string): Promise<Invitacion[]> {
   return await sql<Invitacion[]>`
-    select code, created_at as "createdAt", used_at as "usedAt",
+    select code, email, created_at as "createdAt", used_at as "usedAt",
            revoked_at as "revokedAt", used_by_user_id as "usedByUserId"
     from invitation where inviter_id = ${userId} order by created_at desc`;
 }
@@ -117,10 +124,20 @@ export async function listar(sql: Sql, userId: string): Promise<Invitacion[]> {
  * con el mismo código sólo pueden ganar una, porque `used_at is null` deja de cumplirse en cuanto la
  * primera confirma. Comprobar primero y escribir después daría dos cuentas por el mismo código.
  *
- * Devuelve el código consumido, o `null` si no valía. Ligarlo a su usuario es un paso aparte
- * (`ligarInvitacion`) porque el `id` todavía no existe.
+ * **El email va DENTRO de este mismo `UPDATE`**, nunca en un `if` previo. Una invitación nominal sólo
+ * la consume su destinatario, y comprobarlo antes con un `select` reabriría la carrera que el pase
+ * adversario ya explotó una vez: entre mirar y escribir cabe otra petición. `email is null` significa
+ * **al portador**, que es lo que eran todas las invitaciones antes de FTAI-D.1.
+ *
+ * La comparación ignora mayúsculas porque nadie recuerda cómo escribió su correo al registrarse.
+ *
+ * Devuelve el código consumido, o `null` si no valía — y **`null` no distingue** «código inexistente»
+ * de «no es tu invitación». Es deliberado (§12.4): si se distinguieran, cualquiera con un código
+ * podría preguntar quién está invitado, que es el oráculo de pertenencia que `seguridad` ya cerró una
+ * vez en este mismo flujo. Ligarlo a su usuario es un paso aparte (`ligar`) porque el `id` no existe
+ * todavía.
  */
-export async function consumir(sql: Sql, code: unknown): Promise<string | null> {
+export async function consumir(sql: Sql, code: unknown, email: string): Promise<string | null> {
   // `unknown` y no `string` a propósito: el cuerpo de una petición HTTP es JSON, y JSON trae
   // booleanos. El pase adversario mandó `inviteCode: true`, que es truthy —así que un `if (!code)`
   // lo dejaba pasar— y acababa en `where code = true`, o sea `text = boolean` en Postgres: operador
@@ -130,6 +147,7 @@ export async function consumir(sql: Sql, code: unknown): Promise<string | null> 
   const filas = await sql<{ code: string }[]>`
     update invitation set used_at = now()
     where code = ${code} and used_at is null and revoked_at is null
+      and (email is null or lower(email) = lower(${email}))
     returning code`;
   return filas[0]?.code ?? null;
 }

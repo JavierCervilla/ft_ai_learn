@@ -179,6 +179,54 @@ comprobar(
   `f0-python está ${derivado.estados["f0-python"]}`,
 );
 
+// --- E1-E3: invitaciones ligadas a una persona ---------------------------------------------------
+
+console.log("\nE1-E3 · invitación nominal:");
+// D4 acaba de revocar una invitación, así que queda exactamente 1 de cupo: se gasta aquí.
+const nominalRes = await conSesion(cookie, "/api/invitations", {
+  method: "POST",
+  body: JSON.stringify({ email: `DESTINO-${sello}@Ejemplo.test` }),
+});
+if (nominalRes.ok) {
+  const nominal = await nominalRes.json() as { code: string; email: string };
+  comprobar(
+    nominal.email === `DESTINO-${sello}@Ejemplo.test`,
+    "la invitación guarda a quién va dirigida",
+    `email=${nominal.email}`,
+  );
+
+  // E1: otra persona no la puede usar.
+  const intruso = await registrar(nominal.code, `intruso-${sello}@ejemplo.test`);
+  const cuerpoIntruso = await intruso.text();
+  comprobar(
+    intruso.status === 403,
+    "otra persona NO puede usar una invitación nominal",
+    `HTTP ${intruso.status}`,
+  );
+
+  // E2: y el rechazo es indistinguible del de un código que no existe — si se distinguieran,
+  // cualquiera con un código podría preguntar quién está invitado.
+  const inexistente = await registrar("codigo-que-no-existe-jamas", `otro-${sello}@ejemplo.test`);
+  const cuerpoInexistente = await inexistente.text();
+  comprobar(
+    intruso.status === inexistente.status && cuerpoIntruso === cuerpoInexistente,
+    "«no es tu invitación» y «código inexistente» responden IGUAL (sin oráculo de pertenencia)",
+    `${intruso.status} ${cuerpoIntruso} vs ${inexistente.status} ${cuerpoInexistente}`,
+  );
+
+  // E3: su destinatario sí, y da igual cómo escriba las mayúsculas.
+  const destinatario = await registrar(nominal.code, `destino-${sello}@ejemplo.test`);
+  await destinatario.body?.cancel();
+  comprobar(
+    destinatario.status === 200,
+    "su destinatario SÍ puede usarla, ignorando mayúsculas",
+    `HTTP ${destinatario.status}`,
+  );
+} else {
+  await nominalRes.body?.cancel();
+  comprobar(false, "se pudo emitir una invitación nominal", `HTTP ${nominalRes.status}`);
+}
+
 console.log(`\n${comprobaciones - fallos}/${comprobaciones} comprobaciones en verde`);
 if (fallos > 0) {
   console.error(`${fallos} fallo(s) de reglas`);
