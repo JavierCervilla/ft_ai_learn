@@ -1,0 +1,194 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Filtro de rutas: tocar `content/` no tiene por qué disparar el build de la webapp.
+  changes:
+    name: Detectar cambios
+    runs-on: ubuntu-latest
+    outputs:
+      deno: ${{ steps.filter.outputs.deno }}
+      webapp: ${{ steps.filter.outputs.webapp }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            deno:
+              - 'core/**'
+              - 'server/**'
+              - 'db/**'
+              - 'deno.json'
+              - 'Dockerfile'
+              - 'docker-entrypoint.sh'
+              - '.github/workflows/**'
+            webapp:
+              - 'webapp/**'
+              - 'scripts/**'
+              - '.github/workflows/**'
+
+  # ────────────────────────────────────────────────────────────────────────────────────────────
+  # Este job es el ÚNICO gate de `core/` y `server/`.
+  #
+  # El hook `anti-slop-gate.sh` del framework localiza el proyecto subiendo hasta un `package.json`;
+  # un directorio Deno (`deno.json`) no lo encuentra y el hook lo deja pasar sin exigir nada. O sea
+  # que la parte Deno NO está cubierta por el hook de commit, por diseño del hook y no por descuido.
+  # Si este job se cae o se hace opcional, `core/` y `server/` se quedan sin gate: no tocarlo sin leer
+  # esto antes.
+  # ────────────────────────────────────────────────────────────────────────────────────────────
+  deno:
+    name: Núcleo y servidor · check + lint + fmt + tests
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.deno == 'true' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.9.5"
+      - run: deno task check
+      - run: deno task lint
+      - run: deno task fmt
+      - run: deno task test
+
+  integracion:
+    name: Integración · migraciones y healthcheck contra Postgres
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.deno == 'true' }}
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ftai
+          POSTGRES_PASSWORD: devpass
+          POSTGRES_DB: ftai_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ftai -d ftai_ci"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://ftai:devpass@localhost:5432/ftai_ci
+    steps:
+      - uses: actions/checkout@v5
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.9.5"
+
+      # Antes de migrar, el healthcheck TIENE que decir que falta el esquema. Si dijera que todo va
+      # bien con la base vacía, no estaría mirando nada.
+      - name: El health detecta el esquema ausente
+        run: |
+          mkdir -p webapp/dist && echo "<!doctype html>" > webapp/dist/index.html
+          deno run -A server/src/main.ts &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8000/health && break || sleep 1; done
+          codigo=$(curl -s -o /tmp/salud.json -w '%{http_code}' http://localhost:8000/health || true)
+          cat /tmp/salud.json
+          test "$codigo" = "503" || { echo "esperaba 503 con el esquema sin aplicar, hubo $codigo"; exit 1; }
+          grep -q '"schema":"missing"' /tmp/salud.json || { echo "esperaba schema:missing"; exit 1; }
+          kill %1
+
+      - name: Migrar
+        run: deno run -A --node-modules-dir=none db/migrate.ts
+
+      - name: El health pasa a verde tras migrar
+        run: |
+          deno run -A server/src/main.ts &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8000/health && break || sleep 1; done
+          codigo=$(curl -s -o /tmp/salud.json -w '%{http_code}' http://localhost:8000/health)
+          cat /tmp/salud.json
+          test "$codigo" = "200" || { echo "esperaba 200, hubo $codigo"; exit 1; }
+          grep -q '"ok":true' /tmp/salud.json
+          grep -q '"schema":"ready"' /tmp/salud.json
+          kill %1
+
+      - name: Migrar dos veces es un no-op (idempotencia)
+        run: deno run -A --node-modules-dir=none db/migrate.ts
+
+  webapp:
+    name: Webapp · tsc + anti-slop + build + PWA
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.webapp == 'true' }}
+    defaults:
+      run:
+        working-directory: webapp
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Lint anti-slop (ESLint + sonarjs — skill code-anti-slop)
+        run: npm run lint
+      - name: Build (tsc de la app + tsc del service worker + los dos builds de Vite)
+        run: npm run build
+
+      # Los iconos se generan; si el generador cambia y deja de producir lo que el manifiesto declara,
+      # el test de abajo se pone rojo. Aquí se comprueba además que el fichero commiteado coincide con
+      # lo que el generador produce hoy: un icono editado a mano se detecta.
+      - name: Los iconos commiteados son los que genera el script
+        run: |
+          node ../scripts/generar-iconos.mjs /tmp/iconos
+          for f in icon-192.png icon-512.png icon-maskable-512.png; do
+            cmp "public/icons/$f" "/tmp/iconos/$f" || { echo "$f difiere del generador"; exit 1; }
+          done
+
+      - name: Instalabilidad de la PWA (V5) sobre el build de producción
+        run: npm run test
+
+  seguridad:
+    name: Guardián · escalera de seguridad (secretos + SAST + deps)
+    runs-on: ubuntu-latest
+    needs: changes
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Instalar gitleaks
+        run: |
+          curl -sSL -o /tmp/gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_x64.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+      - name: Escaneo de secretos
+        run: gitleaks detect --config .security-gate-presets/gitleaks.toml --no-banner --redact --verbose
+
+  qa:
+    name: QA · smoke de UI [informativo]
+    runs-on: ubuntu-latest
+    needs: [changes, webapp]
+    if: ${{ needs.changes.outputs.webapp == 'true' }}
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: webapp
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - name: Servir el build y capturar la portada
+        run: npx --yes serve -s dist -l 4173 &
+      - name: Los estáticos que declara el manifiesto responden 200
+        run: |
+          sleep 3
+          for ruta in / /manifest.webmanifest /sw.js /icons/icon-192.png /icons/icon-512.png /icons/icon-maskable-512.png; do
+            codigo=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:4173$ruta")
+            echo "$codigo  $ruta"
+            test "$codigo" = "200" || exit 1
+          done

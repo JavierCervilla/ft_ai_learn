@@ -1,0 +1,8 @@
+{
+  "_comment": "Rutas clave que captura el smoke de QA (qa-smoke.spec.ts). Config versionada de referencia: la fuente efectiva es el array PAGES del spec (Playwright no lee JSON de config por sí solo). Al onboardar un proyecto distinto, ajusta el spec a sus rutas. name -> nombre del PNG.",
+  "pages": [
+    { "name": "home", "route": "/" },
+    { "name": "graph", "route": "/graph" },
+    { "name": "projects", "route": "/projects" }
+  ]
+}

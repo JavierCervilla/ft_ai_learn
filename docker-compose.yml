@@ -1,0 +1,23 @@
+# Postgres de desarrollo.
+#
+# Existe para que `deno task dev` y la suite arranquen sin instalar nada a mano (mismo criterio que
+# Pokelock). No es la base de producción: esa la sirve Dokploy y su URL llega SÓLO por entorno.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ftai
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_DB: ftai_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - ftai-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ftai -d ftai_dev"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  ftai-pgdata:

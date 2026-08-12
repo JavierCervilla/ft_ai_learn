@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@theme {
+  --color-fondo: #0b1020;
+  --color-panel: #121a2e;
+  --color-borde: #1e2b47;
+  --color-tinta: #e6edf7;
+  --color-tenue: #8ea3c4;
+  --color-acento: #7dd3fc;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-fondo);
+  color: var(--color-tinta);
+  /* La app se usa de pie, en el metro: el área segura se descuenta o el contenido se come la muesca. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+}
