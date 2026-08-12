@@ -8,6 +8,12 @@ WORKDIR /build
 COPY webapp/package.json webapp/package-lock.json ./webapp/
 RUN cd webapp && npm ci --no-audit --no-fund
 COPY scripts ./scripts
+# `core/` entra en ESTA etapa aunque la webapp no lo empaquete: su suite importa el núcleo para
+# comprobar que los dos adaptadores lo ejecutan igual (criterio V3), y el `tsc` del build lo lee.
+# Sin esta línea el build falla con «Cannot find module '../../core/tests/casos.ts'» — pasó de
+# verdad, y sólo aquí: en local y en CI el fichero estaba a mano. Tres entornos, tres oportunidades
+# de que la portabilidad sea mentira en uno.
+COPY core ./core
 COPY webapp ./webapp
 RUN cd webapp && npm run build
 
