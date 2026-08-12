@@ -212,6 +212,38 @@ jobs:
 
           kill %1
 
+      # Trinquete del pase adversario: los dos recorridos que un día estuvieron en ROJO se quedan como
+      # gate permanente. No comprueban una feature, comprueban que **dos bugs concretos no vuelven**,
+      # y por eso valen más que un test escrito a priori: nacieron de una rotura reproducida.
+      - name: Trinquete adversario · los hallazgos de qa-adversario siguen cerrados
+        run: |
+          deno run -A server/src/main.ts &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8000/health && break || sleep 1; done
+
+          deno eval "
+            const p = (await import('npm:postgres@3.4.5')).default(Deno.env.get('DATABASE_URL'));
+            await p\`truncate user_progress, invitation, user_invite_quota, session, account, \"user\" cascade\`;
+            await p.end();
+          "
+          # F1 es determinista y no necesita sesión.
+          deno test -A tests/e2e/journeys/adversarial/a6-registro-500-tipo-hostil.spec.ts
+
+          # F2 es una carrera: necesita un host con sesión y cupo de sobra para hammerearla.
+          CODIGO=$(deno task invitar:bootstrap | tail -1)
+          COOKIE=$(curl -s -D- -o /dev/null -X POST http://localhost:8000/api/registro \
+            -H 'content-type: application/json' -H 'origin: http://localhost:8000' \
+            -d "{\"email\":\"trinquete@ejemplo.test\",\"password\":\"contrasena-larga-de-prueba\",\"name\":\"T\",\"inviteCode\":\"$CODIGO\"}" \
+            | grep -i '^set-cookie' | sed 's/^[Ss]et-[Cc]ookie: //' | cut -d';' -f1)
+          deno eval "
+            const p = (await import('npm:postgres@3.4.5')).default(Deno.env.get('DATABASE_URL'));
+            await p\`update user_invite_quota set remaining = 5000\`;
+            await p.end();
+          "
+          COOKIE_HOST="$COOKIE" RONDAS=150 PARALELO=16 \
+            deno test -A tests/e2e/journeys/adversarial/a1-revocacion-derrotada-por-carrera.spec.ts
+
+          kill %1
+
       - name: El bootstrap se cierra en cuanto hay alguien
         run: |
           # La puerta de servicio no se puede volver a abrir: si esto dejara de fallar, cualquiera con

@@ -23,7 +23,8 @@ export interface PeticionRegistro {
   email: string;
   password: string;
   name: string;
-  inviteCode: string;
+  /** `unknown` porque viene de JSON de fuera: lo valida `consumir`, no el tipo. */
+  inviteCode: unknown;
 }
 
 export interface ResultadoRegistro {
@@ -50,7 +51,7 @@ const ALTA_RECHAZADA = { error: "no se pudo completar el alta" };
 export async function registrar(
   { sql, auth, peticion }: { sql: Sql; auth: Auth; peticion: PeticionRegistro },
 ): Promise<ResultadoRegistro> {
-  const codigo = await consumir(sql, peticion.inviteCode ?? "");
+  const codigo = await consumir(sql, peticion.inviteCode);
   if (!codigo) return { estado: 403, cuerpo: ALTA_RECHAZADA, cookies: [] };
 
   let respuesta: Response;
@@ -76,7 +77,14 @@ export async function registrar(
   const creado = await respuesta.json() as Record<string, unknown> & { user?: { id?: string } };
   const userId = creado.user?.id;
   if (userId) {
-    await ligar(sql, codigo, userId);
+    // `ligar` puede fallar: el anfitrión ha podido **revocar el código mientras esto hasheaba la
+    // contraseña**. Si pierde esa carrera, la cuenta no debe existir — se borra, y el `on delete
+    // cascade` del esquema se lleva su sesión y sus credenciales. Dejarla viva sería una cuenta
+    // creada con una invitación cancelada, que es justo lo que revocar viene a impedir.
+    if (!await ligar(sql, codigo, userId)) {
+      await sql`delete from "user" where id = ${userId}`;
+      return { estado: 403, cuerpo: ALTA_RECHAZADA, cookies: [] };
+    }
     await darCupoInicial(sql, userId);
   }
 

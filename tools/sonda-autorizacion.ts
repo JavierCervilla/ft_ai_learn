@@ -244,14 +244,57 @@ comprobar(
   `HTTP ${sinOrigen.status}`,
 );
 
-// 2. Nuestros endpoints no llevan esa comprobación, y no la necesitan: la cookie es `SameSite`, así
-//    que el navegador **no la manda** en una petición cross-site. Si algún día alguien la aflojara a
-//    `None`, este check se pone rojo antes de que el agujero llegue a producción.
+// 2. Nuestros endpoints llevan la suya propia (`origenPropio`), porque **`SameSite` no basta**: es
+//    por *sitio*, no por origen, y `ftai.srcpad.pro` convive con las demás apps bajo `srcpad.pro`.
+//    Se ataca de verdad, con la cookie buena y un origen ajeno — incluido un subdominio hermano,
+//    que es el caso que `SameSite` deja pasar.
+for (const origenAjeno of ["https://evil.example", "https://otra.srcpad.pro"]) {
+  const forjada = await fetch(`${BASE}/api/progress/${NODO_RAIZ}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", cookie: a.cookie, origin: origenAjeno },
+    body: JSON.stringify({ state: "done" }),
+  });
+  await forjada.body?.cancel();
+  comprobar(
+    forjada.status === 403,
+    `un PUT forjado desde ${origenAjeno} con cookie válida se rechaza`,
+    `HTTP ${forjada.status}`,
+  );
+}
+const sinOrigenPropio = await fetch(`${BASE}/api/progress/${NODO_RAIZ}`, {
+  method: "PUT",
+  headers: { "content-type": "application/json", cookie: a.cookie },
+  body: JSON.stringify({ state: "done" }),
+});
+await sinOrigenPropio.body?.cancel();
 comprobar(
-  /SameSite=(Lax|Strict)/i.test(a.cookiesCrudas.join("; ")),
-  "la cookie de sesión es SameSite: sin eso, nuestros PUT/POST quedarían expuestos a CSRF",
-  a.cookiesCrudas.join(" | ") || "(sin cookies)",
+  sinOrigenPropio.status === 403,
+  "un PUT con cookie válida y sin Origin se rechaza",
+  `HTTP ${sinOrigenPropio.status}`,
 );
+
+// --- Atributos de la cookie ----------------------------------------------------------------------
+
+console.log("\natributos de la cookie de sesión:");
+// La versión anterior de esta sonda decía guardar las cookies crudas «para auditar SameSite/HttpOnly»
+// y sólo comprobaba `SameSite`. Lo señaló el pase de rol `seguridad`: con `httpOnly: false` las 20
+// comprobaciones seguían verdes y el punto §12.2 se caía entero en silencio. Un comentario que
+// promete una comprobación que no existe es peor que no tenerla.
+const cookies = a.cookiesCrudas.join(" | ");
+comprobar(/HttpOnly/i.test(cookies), "es HttpOnly: el JS de la página no la puede leer", cookies);
+comprobar(/SameSite=(Lax|Strict)/i.test(cookies), "es SameSite", cookies);
+comprobar(/Max-Age=\d+|Expires=/i.test(cookies), "tiene caducidad declarada", cookies);
+// `Secure` sólo se puede exigir donde hay HTTPS: en el dev local (HTTP) la cookie no viajaría y no
+// habría login. Se comprueba **la rama que toque**, no se da por buena la que no se está ejecutando.
+if (BASE.startsWith("https://")) {
+  comprobar(/;\s*Secure/i.test(cookies), "es Secure (base HTTPS)", cookies);
+} else {
+  comprobar(
+    !/;\s*Secure/i.test(cookies),
+    "NO es Secure (base HTTP): si lo fuera, no habría login en local",
+    cookies,
+  );
+}
 
 // --- El alta directa de la librería está cerrada -------------------------------------------------
 

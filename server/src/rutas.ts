@@ -113,9 +113,15 @@ export function montarRutas(router: Router, { sql, auth, baseUrl, leerGrafo }: D
   /** El alta con invitación. Ver `registro.ts` para el orden de los pasos y por qué es ese. */
   router.post("/api/registro", async (ctx) => {
     const cuerpo = await ctx.request.body.json().catch(() => null) as
-      | Record<string, string>
+      | Record<string, unknown>
       | null;
-    if (!cuerpo?.email || !cuerpo?.password || !cuerpo?.name) {
+    // Se exige que sean **cadenas**, no sólo que estén: el cuerpo es JSON de fuera y puede traer
+    // booleanos, números u objetos en cualquier campo.
+    const texto = (v: unknown) => typeof v === "string" && v !== "" ? v : null;
+    const email = texto(cuerpo?.email);
+    const password = texto(cuerpo?.password);
+    const name = texto(cuerpo?.name);
+    if (!email || !password || !name) {
       ctx.response.status = 400;
       ctx.response.body = { error: "faltan email, password o name" };
       return;
@@ -123,12 +129,7 @@ export function montarRutas(router: Router, { sql, auth, baseUrl, leerGrafo }: D
     const resultado = await registrar({
       sql,
       auth,
-      peticion: {
-        email: cuerpo.email,
-        password: cuerpo.password,
-        name: cuerpo.name,
-        inviteCode: cuerpo.inviteCode ?? "",
-      },
+      peticion: { email, password, name, inviteCode: cuerpo?.inviteCode },
     });
     ctx.response.status = resultado.estado;
     for (const cookie of resultado.cookies) ctx.response.headers.append("set-cookie", cookie);

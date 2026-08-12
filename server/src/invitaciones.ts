@@ -81,10 +81,20 @@ export async function emitir(sql: Sql, userId: string): Promise<Invitacion | nul
  */
 export async function revocar(sql: Sql, userId: string, code: string): Promise<boolean> {
   return await sql.begin(async (tx) => {
+    // La condición es **`used_by_user_id is null`**, no `used_at is null`, y esa diferencia es un
+    // hallazgo del pase adversario. `used_at` se pone al RESERVAR el código, al principio de un alta
+    // que todavía puede fallar (y que tarda ~285 ms hashando la contraseña). Con la condición
+    // anterior, un tercero que lanzara altas condenadas a fallar mantenía el código «en vuelo» de
+    // forma indefinida, y durante esa ventana la revocación **no encontraba fila**: devolvía el mismo
+    // 404 que para un código inexistente —así que el anfitrión creía haberlo revocado—, no devolvía
+    // el cupo, y la compensación `liberar()` dejaba el código vivo para usarlo después.
+    //
+    // Ahora manda la intención del anfitrión: se puede revocar todo lo que **aún no es de nadie**.
+    // Un alta en vuelo que pierda esta carrera se cae en `ligar()`, que es donde debe caerse.
     const filas = await tx`
       update invitation set revoked_at = now()
       where code = ${code} and inviter_id = ${userId}
-        and used_at is null and revoked_at is null
+        and used_by_user_id is null and revoked_at is null
       returning code`;
     if (filas.length === 0) return false;
     await tx`update user_invite_quota set remaining = remaining + 1 where user_id = ${userId}`;
@@ -110,8 +120,13 @@ export async function listar(sql: Sql, userId: string): Promise<Invitacion[]> {
  * Devuelve el código consumido, o `null` si no valía. Ligarlo a su usuario es un paso aparte
  * (`ligarInvitacion`) porque el `id` todavía no existe.
  */
-export async function consumir(sql: Sql, code: string): Promise<string | null> {
-  if (!code) return null;
+export async function consumir(sql: Sql, code: unknown): Promise<string | null> {
+  // `unknown` y no `string` a propósito: el cuerpo de una petición HTTP es JSON, y JSON trae
+  // booleanos. El pase adversario mandó `inviteCode: true`, que es truthy —así que un `if (!code)`
+  // lo dejaba pasar— y acababa en `where code = true`, o sea `text = boolean` en Postgres: operador
+  // inexistente, excepción sin manejar y **500 opaco** donde tocaba un 403 de dominio. Tipar el
+  // parámetro como `string` no protegía de nada: TypeScript no está en la frontera, esto sí.
+  if (typeof code !== "string" || code === "") return null;
   const filas = await sql<{ code: string }[]>`
     update invitation set used_at = now()
     where code = ${code} and used_at is null and revoked_at is null
@@ -124,7 +139,18 @@ export async function liberar(sql: Sql, code: string): Promise<void> {
   await sql`update invitation set used_at = null where code = ${code} and used_by_user_id is null`;
 }
 
-/** Cierra la invitación contra el usuario que acabó creándose. */
-export async function ligar(sql: Sql, code: string, userId: string): Promise<void> {
-  await sql`update invitation set used_by_user_id = ${userId} where code = ${code}`;
+/**
+ * Cierra la invitación contra el usuario que acabó creándose.
+ *
+ * **Condicionada a que no la hayan revocado mientras tanto**, y devuelve si lo consiguió. Es el otro
+ * lado de la carrera que arregla `revocar`: si el anfitrión revocó el código mientras esta alta
+ * hasheaba la contraseña, aquí no hay fila que cerrar y el alta debe deshacerse. Un `update`
+ * incondicional daría una cuenta creada con una invitación ya cancelada.
+ */
+export async function ligar(sql: Sql, code: string, userId: string): Promise<boolean> {
+  const filas = await sql`
+    update invitation set used_by_user_id = ${userId}
+    where code = ${code} and revoked_at is null
+    returning code`;
+  return filas.length > 0;
 }
