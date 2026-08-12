@@ -13,5 +13,11 @@ set -e
 echo "[arranque] aplicando migraciones…"
 deno run -A --node-modules-dir=none db/migrate.ts
 
+# El contenido se carga en cada arranque, no una vez: es idempotente por diseño y así el despliegue
+# y la base no pueden quedar desincronizados. Si el contenido incumple una regla, el cargador aborta
+# sin escribir nada y `set -e` mata el contenedor — mejor que servir un grafo a medias.
+echo "[arranque] cargando el contenido del grafo…"
+deno run -A --node-modules-dir=none db/cargar.ts
+
 echo "[arranque] sirviendo en :${PORT:-8000}"
 exec deno run -A server/src/main.ts

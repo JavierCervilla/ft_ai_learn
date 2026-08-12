@@ -1,5 +1,6 @@
 import { Application, Router } from "@oak/oak";
 import { crearCliente, sondaDe } from "./db.ts";
+import { leerGrafo } from "./grafo.ts";
 import { salud } from "./salud.ts";
 
 /**
@@ -30,6 +31,20 @@ router.get("/health", async (ctx) => {
   // instancia que no llega a su base.
   ctx.response.status = estado.ok ? 200 : 503;
   ctx.response.body = estado;
+});
+
+/**
+ * El grafo entero en una respuesta.
+ *
+ * **Sin autenticación a propósito**: el contenido del grafo no es secreto —son enlaces públicos y
+ * rúbricas—. Lo que sí lo es, el progreso de cada persona, no se sirve aquí y llega con su propia
+ * autorización en FTAI-D.
+ *
+ * Sin paginar: a esta escala partirlo sería complejidad sin beneficio. Cuando deje de serlo se
+ * medirá antes de complicarlo.
+ */
+router.get("/api/graph", async (ctx) => {
+  ctx.response.body = await leerGrafo(sql);
 });
 
 const app = new Application();

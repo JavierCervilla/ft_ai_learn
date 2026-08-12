@@ -4,7 +4,8 @@
   "exports": "./src/main.ts",
   "imports": {
     "@oak/oak": "jsr:@oak/oak@^17.1.4",
-    "postgres": "npm:postgres@^3.4.5"
+    "postgres": "npm:postgres@^3.4.5",
+    "@ftai/core": "../core/src/mod.ts"
   },
   "tasks": {
     "dev": "deno run -A --watch src/main.ts"

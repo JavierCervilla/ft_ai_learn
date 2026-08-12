@@ -27,6 +27,8 @@ jobs:
               - 'core/**'
               - 'server/**'
               - 'db/**'
+              - 'tools/**'
+              - 'content/**'
               - 'deno.json'
               - 'Dockerfile'
               - 'docker-entrypoint.sh'
@@ -60,8 +62,26 @@ jobs:
       - run: deno task fmt
       - run: deno task test
 
+  contenido:
+    name: Contenido · las 14 reglas del contrato
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.deno == 'true' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.9.5"
+      - name: Reglas 1-8 y 10-14 (deterministas, sin red)
+        run: deno task contenido:validar
+      # Regla 9 aparte: necesita red y distingue "enlace muerto" de "bloqueado por el entorno".
+      # Un enlace caído de un tercero no debe poner rojo un PR que no lo tocó, así que informa.
+      - name: Regla 9 · los enlaces resuelven [informativo]
+        continue-on-error: true
+        run: deno task contenido:enlaces
+
   integracion:
-    name: Integración · migraciones y healthcheck contra Postgres
+    name: Integración · migraciones, carga del grafo y healthcheck
     runs-on: ubuntu-latest
     needs: changes
     if: ${{ needs.changes.outputs.deno == 'true' }}
@@ -113,6 +133,42 @@ jobs:
 
       - name: Migrar dos veces es un no-op (idempotencia)
         run: deno run -A --node-modules-dir=none db/migrate.ts
+
+      - name: Cargar el contenido
+        run: deno task contenido:cargar
+
+      - name: Cargar dos veces no cambia una fila (idempotencia del cargador)
+        run: |
+          antes=$(deno eval "
+            const p = (await import('npm:postgres@3.4.5')).default(Deno.env.get('DATABASE_URL'));
+            const [f] = await p\`select (select count(*) from node) n, (select count(*) from node_prereq) a\`;
+            console.log(f.n + '/' + f.a); await p.end();
+          ")
+          deno task contenido:cargar
+          despues=$(deno eval "
+            const p = (await import('npm:postgres@3.4.5')).default(Deno.env.get('DATABASE_URL'));
+            const [f] = await p\`select (select count(*) from node) n, (select count(*) from node_prereq) a\`;
+            console.log(f.n + '/' + f.a); await p.end();
+          ")
+          echo "antes=$antes despues=$despues"
+          test "$antes" = "$despues" || { echo "el cargador no es idempotente"; exit 1; }
+
+      - name: GET /api/graph devuelve el grafo cargado
+        run: |
+          deno run -A server/src/main.ts &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8000/health && break || sleep 1; done
+          curl -s http://localhost:8000/api/graph > /tmp/grafo.json
+          deno eval "
+            const g = JSON.parse(await Deno.readTextFile('/tmp/grafo.json'));
+            console.log(g.branches.length + ' ramas, ' + g.nodes.length + ' nodos');
+            if (g.branches.length !== 7 || g.nodes.length !== 5) {
+              console.error('esperaba 7 ramas y 5 nodos'); Deno.exit(1);
+            }
+            const proyecto = g.nodes.find((n) => n.type === 'project');
+            if (!proyecto?.rubric?.length) { console.error('el nodo-proyecto llegó sin rúbrica'); Deno.exit(1); }
+            if (!g.nodes.some((n) => n.prerequisites.length > 0)) { console.error('no llegó ninguna arista'); Deno.exit(1); }
+          "
+          kill %1
 
   webapp:
     name: Webapp · tsc + anti-slop + build + PWA
