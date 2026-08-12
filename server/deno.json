@@ -8,7 +8,7 @@
     "@ftai/core": "../core/src/mod.ts",
     "better-auth": "npm:better-auth@^1.6.26",
     "better-auth/": "npm:/better-auth@^1.6.26/",
-    "drizzle-orm/": "npm:/drizzle-orm@^0.44.0/",
+    "drizzle-orm/": "npm:/drizzle-orm@^0.45.2/",
     "@noble/hashes/": "npm:/@noble/hashes@^2.3.0/",
     "@ftai/esquema": "../db/schema.ts"
   },

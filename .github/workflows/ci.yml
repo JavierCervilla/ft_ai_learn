@@ -263,6 +263,9 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.9.5"
       - name: Instalar gitleaks
         run: |
           curl -sSL -o /tmp/gitleaks.tar.gz \
@@ -287,11 +290,18 @@ jobs:
       - name: SAST (semgrep, ruleset vendorizado)
         run: semgrep --config .security-gate-presets/semgrep --metrics=off --error --quiet .
 
-      - name: CVE de dependencias (osv-scanner)
-        run: osv-scanner scan source --lockfile=deno.lock --lockfile=webapp/package-lock.json .
+      # `osv-scanner` cubre SÓLO la webapp: no sabe leer `deno.lock` («could not determine extractor
+      # suitable to this file»), así que pasárselo no es que no aporte, es que rompe el paso. El lado
+      # del servidor lo cubre `tools/cve-deno.ts` contra la misma base de OSV — y hace falta, porque
+      # ahí es donde viven better-auth, drizzle-orm y @noble/hashes.
+      - name: CVE de dependencias · webapp (osv-scanner)
+        run: osv-scanner scan source -L webapp/package-lock.json
 
-      - name: CVE de dependencias (npm audit, high+)
+      - name: CVE de dependencias · webapp (npm audit, high+)
         run: npm audit --audit-level=high --prefix webapp
+
+      - name: CVE de dependencias · servidor y migraciones (OSV sobre deno.lock)
+        run: deno run -A tools/cve-deno.ts
 
   qa:
     name: QA · smoke de UI [informativo]
