@@ -1,0 +1,17 @@
+node_modules/
+dist/
+*.local
+
+# Secretos: nunca en el repo (spec §12). Sólo por entorno.
+.env
+.env.*
+!.env.example
+
+# Artefactos de verificación
+coverage/
+playwright-report/
+test-results/
+qa-bundles/
+
+# Sistema
+.DS_Store
