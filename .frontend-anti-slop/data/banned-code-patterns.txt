@@ -1,0 +1,7 @@
+# Anti-patrones de codigo de presentacion (slop tecnico).
+# Un patron grep por linea. Lineas vacias y las que empiezan por # se ignoran.
+# Eje: Codigo | Severidad: dura.
+style=\{\{
+!important
+console\.log\(
+: any\b

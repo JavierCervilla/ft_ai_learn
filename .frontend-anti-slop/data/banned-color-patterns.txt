@@ -1,0 +1,17 @@
+# Color hardcoded fuera de la capa de tokens y gradientes cliche.
+# Un patron grep por linea. Lineas vacias y las que empiezan por # se ignoran.
+# Eje: Color | Severidad: dura.
+# Gradiente morado->azul cliche (Tailwind).
+from-purple-[0-9]+[^"'` ]*[[:space:]]+to-blue-[0-9]+
+from-violet-[0-9]+[^"'` ]*[[:space:]]+to-indigo-[0-9]+
+from-indigo-[0-9]+[^"'` ]*[[:space:]]+to-purple-[0-9]+
+# Color hex hardcoded (#rgb, #rrggbb, #rrggbbaa) en JSX/CSS fuera de tokens.
+# El '#' literal se escribe como [#] para que el patron NO se confunda con un comentario.
+[#][0-9a-fA-F]{3}\b
+[#][0-9a-fA-F]{6}\b
+[#][0-9a-fA-F]{8}\b
+# Funciones de color literales en componentes (usar tokens OKLCH en su lugar).
+rgb\(
+rgba\(
+hsl\(
+hsla\(

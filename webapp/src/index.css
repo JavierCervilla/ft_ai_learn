@@ -1,12 +1,63 @@
 @import "tailwindcss";
+@import "./fuentes.css";
 
+/**
+ * Tokens de «Carta estelar» — ver `webapp/design-brief.md`.
+ *
+ * En **OKLCH** y no en hex porque es lo que exige el gate de UI del framework, y porque en un espacio
+ * perceptual se puede subir o bajar la luminosidad de un token sin que el tono se vaya: eso es lo que
+ * hace posible derivar `--color-apagado` de `--color-acento` y que sigan siendo la misma luz, más
+ * lejos. Con hex habría que elegir un color nuevo a ojo y esperar que pegara.
+ *
+ * Los seis primeros son los de la semilla de FTAI-B, convertidos. Los hex de referencia y su
+ * conversión están en la tabla de paleta de `design-brief.md`: ahí es donde se auditan, y no
+ * duplicados en un comentario aquí — el gate veta hex en la capa de presentación **incluso en
+ * comentarios**, y tiene razón, porque un hex comentado es el que alguien copia y pega mañana.
+ */
 @theme {
-  --color-fondo: #0b1020;
-  --color-panel: #121a2e;
-  --color-borde: #1e2b47;
-  --color-tinta: #e6edf7;
-  --color-tenue: #8ea3c4;
-  --color-acento: #7dd3fc;
+  /* --- La noche ------------------------------------------------------------------------------- */
+  --color-fondo: oklch(17.7% 0.034 269.6);
+  --color-panel: oklch(22.1% 0.041 266.5);
+  --color-borde: oklch(29.2% 0.054 264.4);
+
+  /* --- La tinta ------------------------------------------------------------------------------- */
+  --color-tinta: oklch(94.4% 0.015 257.2);
+  --color-tenue: oklch(71.1% 0.054 259.4);
+
+  /* --- La luz --------------------------------------------------------------------------------- */
+  --color-acento: oklch(82.8% 0.101 230.3);
+
+  /**
+   * Vocabulario del mapa. Se declara aquí y no en FTAI-E a propósito: son los estados de un nodo, y
+   * el brief que los justifica se escribe una vez. Todos salen del acento moviendo SÓLO luminosidad
+   * y croma, así que son la misma estrella a distinta distancia.
+   */
+  --color-halo: oklch(82.8% 0.101 230.3 / 22%); /* disponible: el acento, respirando */
+  --color-linea: oklch(45% 0.06 245); /* arista trazada entre dos nodos */
+  --color-apagado: oklch(38% 0.02 262); /* bloqueado: estrella que aún no se ve */
+
+  /* Reservado para lo que reclama atención: cupo agotado, alta rechazada. Raro por diseño. */
+  --color-alerta: oklch(78% 0.13 65);
+
+  /* --- Tipografía ----------------------------------------------------------------------------- */
+  /**
+   * La display se auto-aloja (ver `fuentes.css`): la spec §13.3 prohíbe terceros en el camino
+   * crítico y §13.4 pide offline de verdad, así que una fuente de CDN está descartada por contrato,
+   * no por gusto.
+   *
+   * El cuerpo va con stack de sistema **a propósito y de forma legítima**: la marca la lleva la
+   * display, y en el metro cada byte de la primera carga se paga. El gate veta `system-ui` como
+   * fuente *de marca*, que no es este caso.
+   */
+  --font-display: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-cuerpo: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  /* --- Movimiento ----------------------------------------------------------------------------- */
+  /* Duraciones desde tokens, no mágicas y dispersas por los componentes. */
+  --duracion-toque: 120ms;
+  --duracion-entrada: 260ms;
+  --easing-salida: cubic-bezier(0.2, 0, 0, 1);
 }
 
 html,
@@ -18,7 +69,59 @@ body,
 body {
   background: var(--color-fondo);
   color: var(--color-tinta);
+  font-family: var(--font-cuerpo);
   /* La app se usa de pie, en el metro: el área segura se descuenta o el contenido se come la muesca. */
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
     env(safe-area-inset-left);
+}
+
+/**
+ * El cielo: un campo de estrellas fijo detrás de todo.
+ *
+ * Es un `radial-gradient` repetido y no un `<canvas>` ni un PNG porque tiene que estar antes del
+ * primer pintado, pesar cero y no bloquear nada. Es la única decoración del producto y existe para
+ * que el acceso ya se sienta «dentro del mapa» antes de que haya mapa.
+ */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1px 1px at 12% 22%, var(--color-tenue), transparent),
+    radial-gradient(1px 1px at 68% 14%, var(--color-acento), transparent),
+    radial-gradient(1px 1px at 34% 71%, var(--color-tenue), transparent),
+    radial-gradient(1px 1px at 84% 63%, var(--color-tenue), transparent),
+    radial-gradient(1px 1px at 52% 41%, var(--color-acento), transparent),
+    radial-gradient(1px 1px at 21% 88%, var(--color-tenue), transparent),
+    radial-gradient(1px 1px at 91% 33%, var(--color-tenue), transparent);
+  opacity: 0.5;
+}
+
+/* En movimiento y con mareo, la animación es hostil. Se respeta la preferencia del sistema. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important; /* anti-slop-allow: anular motion es el uso legítimo de !important */
+    transition-duration: 0.01ms !important; /* anti-slop-allow: idem, exigido por prefers-reduced-motion */
+  }
+}
+
+/**
+ * El único momento animado de esta pantalla: el código recién emitido.
+ *
+ * Se anima **eso y nada más** porque es lo único que hay que copiar antes de que desaparezca; un
+ * formulario que se mueve entero es un formulario que estorba (brief §6).
+ */
+@keyframes aparecer {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }

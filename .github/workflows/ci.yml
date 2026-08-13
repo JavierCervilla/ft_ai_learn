@@ -244,6 +244,75 @@ jobs:
 
           kill %1
 
+      # Los recorridos de interfaz corren contra ESTE servidor: el mismo que sirve el bundle estático
+      # y la API, con su base de verdad. Un `serve dist` con la API mockeada probaría el mock, y lo
+      # que hay que probar es que el formulario habla con el backend — que es justo lo que faltaba.
+      - name: Recorridos de acceso (F3-F5) en navegador
+        run: |
+          (cd webapp && npm ci --no-audit --no-fund && npm run build)
+          deno run -A server/src/main.ts &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8000/health && break || sleep 1; done
+
+          deno eval "
+            const p = (await import('npm:postgres@3.4.5')).default(Deno.env.get('DATABASE_URL'));
+            await p\`truncate user_progress, invitation, user_invite_quota, session, account, \"user\" cascade\`;
+            await p.end();
+          "
+          CODIGO=$(deno task invitar:bootstrap | tail -1)
+
+          cd webapp
+          npx playwright install --with-deps chromium
+          # **Su fichero y sólo su fichero.** Con `npm run test:e2e` (que es `playwright test` sin
+          # filtro) este paso recogía también los recorridos adversarios y **se los saltaba en
+          # silencio**: su `anfitrion()` va a por `CODIGO_BOOTSTRAP`, que es de un solo uso y el
+          # `beforeAll` de aquí ya se lo ha gastado. Salía `10 tests … 7 skipped` y el paso en verde.
+          # Los adversarios tienen su propio paso, con su `COOKIE_HOST`; aquí sobran. Un paso que
+          # reporta verde saltándose la mitad de lo que ejecuta es el patrón que esta trayectoria ya
+          # documenta tres veces.
+          CODIGO_BOOTSTRAP="$CODIGO" npx playwright test tests/e2e/acceso.spec.ts
+          cd ..
+          kill %1
+
+      # Trinquete adversario **de interfaz**: los ocho recorridos que estuvieron en rojo tras el pase
+      # de `qa-adversario` sobre FTAI-D.2 (doble clic en revocar, lista congelada tras un fallo,
+      # código pegado con un espacio, cupo quemado en un correo inválido, identidad cruzada entre
+      # pestañas, y el offline en frío y en caliente).
+      #
+      # Van en su **propia invocación** y con `COOKIE_HOST`, no con `CODIGO_BOOTSTRAP`: el código de
+      # bootstrap es de un solo uso y el paso anterior ya se lo gastó. El cupo del anfitrión se sube a
+      # mano porque estos recorridos acuñan varias invitaciones y el cupo real son 3 — que es
+      # exactamente lo que hay que probar en `acceso.spec.ts`, y aquí sólo estorbaría.
+      - name: Trinquete adversario de interfaz · los hallazgos de D.2 siguen cerrados
+        run: |
+          deno run -A server/src/main.ts &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8000/health && break || sleep 1; done
+
+          deno eval "
+            const p = (await import('npm:postgres@3.4.5')).default(Deno.env.get('DATABASE_URL'));
+            await p\`truncate user_progress, invitation, user_invite_quota, session, account, \"user\" cascade\`;
+            await p.end();
+          "
+          CODIGO=$(deno task invitar:bootstrap | tail -1)
+          COOKIE=$(curl -s -D- -o /dev/null -X POST http://localhost:8000/api/registro \
+            -H 'content-type: application/json' -H 'origin: http://localhost:8000' \
+            -d "{\"email\":\"adversario@ejemplo.test\",\"password\":\"contrasena-larga-de-prueba\",\"name\":\"A\",\"inviteCode\":\"$CODIGO\"}" \
+            | grep -i '^set-cookie' | sed 's/^[Ss]et-[Cc]ookie: //' | cut -d';' -f1)
+          deno eval "
+            const p = (await import('npm:postgres@3.4.5')).default(Deno.env.get('DATABASE_URL'));
+            await p\`update user_invite_quota set remaining = 5000\`;
+            await p.end();
+          "
+
+          cd webapp
+          COOKIE_HOST="$COOKIE" npx playwright test tests/e2e/journeys/adversarial
+          cd ..
+          kill %1
+
+      # El gate de interfaz, atacado por su propio flanco: `qa-adversario` demostró que daba LIMPIO
+      # sobre el color de marca hardcodeado porque no miraba `.html`. Determinista y sin servidor.
+      - name: Trinquete adversario · el gate de interfaz no es ciego al HTML
+        run: deno test -A tests/e2e/journeys/adversarial/a12-gate-anti-slop-ciego-al-html.spec.ts
+
       - name: El bootstrap se cierra en cuanto hay alguien
         run: |
           # La puerta de servicio no se puede volver a abrir: si esto dejara de fallar, cualquiera con
@@ -271,6 +340,20 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: Lint anti-slop (ESLint + sonarjs — skill code-anti-slop)
         run: npm run lint
+
+      # El gate de INTERFAZ, que es otro: el de arriba mira el código, éste mira el diseño (tokens
+      # OKLCH, fuentes de marca, hex sueltos, estilos inline). Faltaba desde FTAI-B pese a que el
+      # nombre del job dice «anti-slop», y al enchufarlo salieron 6 violaciones duras en los tokens
+      # de la semilla. Corre desde la raíz porque el script vendorizado vive fuera de `webapp/`.
+      #
+      # Apunta a `webapp` y **no** a `webapp/src`, que es donde estaba: `qa-adversario` reprodujo
+      # (F9/A12) que el gate era ciego a `index.html` y al manifiesto —los dos ficheros donde vive la
+      # identidad visual de una PWA— y daba `criticos=0 · LIMPIO` con el color de marca en crudo a la
+      # vista en los tres sitios. Enseñarle a leer `.html` sin ampliar el objetivo habría sido el
+      # mismo error otra vez: un gate se audita por lo que ejecuta, no por lo que sabe hacer.
+      - name: Anti-slop de interfaz (skill frontend-anti-slop, vendorizada)
+        working-directory: .
+        run: bash .frontend-anti-slop/scripts/audit-anti-slop.sh webapp
       - name: Build (tsc de la app + tsc del service worker + los dos builds de Vite)
         run: npm run build
 

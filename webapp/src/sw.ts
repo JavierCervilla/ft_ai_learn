@@ -13,11 +13,38 @@
  */
 const sw = self as unknown as ServiceWorkerGlobalScope;
 
-const CACHE = "ftai-armazon-v1";
+const CACHE = "ftai-armazon-v2";
+
+/** El mínimo con el que la app abre, si `precache.json` no se pudiera leer. */
 const ARMAZON = ["/", "/index.html", "/manifest.webmanifest"];
 
+/**
+ * Qué se precarga.
+ *
+ * `ARMAZON` a secas era **abrir**, no **funcionar**: los `assets/*` con hash se piden antes de que
+ * este SW controle la página, así que nunca llegaban a la caché y sin red el navegador recibía el
+ * `index.html` del fallback donde esperaba un módulo JS. `#root` vacío, página en blanco en el metro
+ * (F2/A9 de `qa-adversario`). La lista la genera `scripts/precache.mjs` en cada build porque los
+ * nombres llevan hash: escrita a mano estaría desactualizada al commit siguiente, y en silencio.
+ *
+ * Si `precache.json` falla se cae al armazón en vez de abortar la instalación: un SW instalado a
+ * medias sigue sirviendo la app con red, y uno no instalado no sirve nada.
+ */
+async function aPrecargar(): Promise<string[]> {
+  try {
+    const res = await fetch("/precache.json", { cache: "no-cache" });
+    if (!res.ok) return ARMAZON;
+    const lista = await res.json();
+    return Array.isArray(lista) && lista.length > 0 ? lista as string[] : ARMAZON;
+  } catch {
+    return ARMAZON;
+  }
+}
+
 sw.addEventListener("install", (evento) => {
-  evento.waitUntil(caches.open(CACHE).then((c) => c.addAll(ARMAZON)));
+  evento.waitUntil(
+    aPrecargar().then((lista) => caches.open(CACHE).then((c) => c.addAll(lista))),
+  );
   sw.skipWaiting();
 });
 
@@ -46,7 +73,14 @@ sw.addEventListener("fetch", (evento) => {
       })
       .catch(async () => {
         const enCache = await caches.match(evento.request);
-        return enCache ?? (await caches.match("/index.html")) ?? Response.error();
+        if (enCache) return enCache;
+        // El `index.html` sólo vale como red de seguridad para una **navegación**. Devolverlo para
+        // un `assets/*.js` que falta le da al navegador `text/html` donde espera un módulo, y el
+        // error que sale entonces habla de MIME types en vez de decir que falta el fichero.
+        if (evento.request.mode === "navigate") {
+          return (await caches.match("/index.html")) ?? Response.error();
+        }
+        return Response.error();
       }),
   );
 });

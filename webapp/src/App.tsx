@@ -1,88 +1,109 @@
-import { useEffect, useState } from "react";
-
-interface Salud {
-  ok: boolean;
-  db: "up" | "down";
-  schema: "ready" | "missing" | "unknown";
-  version: string;
-}
-
-type Estado = { fase: "cargando" } | { fase: "ok"; salud: Salud } | { fase: "sin-red" };
+import { useCallback, useEffect, useState } from "react";
+import { ErrorApi, type Sesion, sesionActual, SIN_RED } from "./api.ts";
+import { Acceso } from "./Acceso.tsx";
+import { Cuenta } from "./Cuenta.tsx";
 
 /**
- * La pantalla de la semilla.
+ * Quién ve qué.
  *
- * Existe para enseñar que la cadena está enchufada de punta a punta —navegador → API → Postgres— y
- * para tener dónde medir la instalabilidad de la PWA. El grafo lo pinta FTAI-E.
+ * Sin router: son dos pantallas y una pregunta al servidor. `react-router` sería una dependencia,
+ * un bundle mayor y un modelo mental más para resolver un `if` — y la spec §6.2 dice que el cliente
+ * es un bundle estático que hay que poder empaquetar para tiendas. Cuando el grafo traiga rutas de
+ * verdad (un nodo por URL, compartible) se añadirá con un motivo, no por costumbre.
+ *
+ * `cargando` existe como estado propio para no pintar el formulario de acceso durante el parpadeo
+ * inicial: quien ya tiene sesión no debería ver un login que desaparece.
+ *
+ * **`sinRed` existe por la misma razón, llevada hasta el final.** No saber quién eres porque no hay
+ * cobertura no es lo mismo que saber que no eres nadie, y confundirlos le enseñaba la pantalla de
+ * acceso a quien tenía la sesión viva (F3/A9 de `qa-adversario`). Un estado que la app no puede
+ * distinguir es un estado sobre el que va a mentir.
  */
+type Estado =
+  | { fase: "cargando" }
+  | { fase: "sinRed" }
+  | { fase: "fuera" }
+  | { fase: "dentro"; sesion: Sesion };
+
 export function App() {
   const [estado, setEstado] = useState<Estado>({ fase: "cargando" });
 
+  const preguntar = useCallback(async (): Promise<Estado> => {
+    try {
+      const s = await sesionActual();
+      return s ? { fase: "dentro", sesion: s } : { fase: "fuera" };
+    } catch (fallo) {
+      if (fallo instanceof ErrorApi && fallo.estado === SIN_RED) return { fase: "sinRed" };
+      return { fase: "fuera" };
+    }
+  }, []);
+
   useEffect(() => {
     let vivo = true;
-    fetch("/health")
-      .then((r) => r.json())
-      .then((salud: Salud) => vivo && setEstado({ fase: "ok", salud }))
-      // Sin red no se miente diciendo que todo va bien: se dice que no se pudo preguntar.
-      .catch(() => vivo && setEstado({ fase: "sin-red" }));
+    preguntar().then((e) => vivo && setEstado(e));
     return () => {
       vivo = false;
     };
-  }, []);
+  }, [preguntar]);
 
-  return (
-    <main className="mx-auto flex min-h-full max-w-2xl flex-col justify-center gap-8 px-6 py-12">
-      <header className="flex flex-col gap-3">
-        <img src="/icons/icon-192.png" alt="" width={56} height={56} className="rounded-xl" />
-        <h1 className="text-3xl font-semibold tracking-tight">Holy Graph de IA</h1>
-        <p className="text-[var(--color-tenue)]">
-          Un mapa de competencias recorrible en sentadas de quince minutos. Cada nodo se aprueba con
-          evidencia en Git y desbloquea los siguientes.
-        </p>
-      </header>
+  /**
+   * Al volver a la pestaña, se vuelve a preguntar quién eres.
+   *
+   * La cookie es del navegador entero: si en otra pestaña alguien sale y entra con su cuenta, ésta
+   * seguía pintando al anterior indefinidamente. Ver el comentario de `recargar` en `Cuenta.tsx` —
+   * allí está el daño concreto, que no es cosmético.
+   */
+  useEffect(() => {
+    const alVolver = () => {
+      if (document.visibilityState !== "visible") return;
+      preguntar().then(setEstado);
+    };
+    document.addEventListener("visibilitychange", alVolver);
+    globalThis.addEventListener("focus", alVolver);
+    return () => {
+      document.removeEventListener("visibilitychange", alVolver);
+      globalThis.removeEventListener("focus", alVolver);
+    };
+  }, [preguntar]);
 
-      <section className="rounded-xl border border-[var(--color-borde)] bg-[var(--color-panel)] p-5">
-        <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-[var(--color-tenue)]">
-          Estado del servicio
-        </h2>
-        <Diagnostico estado={estado} />
-      </section>
-
-      <p className="text-sm text-[var(--color-tenue)]">
-        Semilla del proyecto. El grafo navegable, el progreso y el radar llegan en las trayectorias
-        siguientes.
-      </p>
-    </main>
-  );
-}
-
-function Diagnostico({ estado }: { estado: Estado }) {
   if (estado.fase === "cargando") {
-    return <p className="text-[var(--color-tenue)]">Preguntando…</p>;
-  }
-  if (estado.fase === "sin-red") {
     return (
-      <p className="text-[var(--color-tenue)]">
-        Sin conexión con el servidor. La app abre igual: lo que ya viste sigue disponible.
-      </p>
+      <main className="flex min-h-full items-center justify-center">
+        <p className="text-[var(--color-tenue)]">…</p>
+      </main>
     );
   }
-  const { salud } = estado;
-  return (
-    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
-      <Fila termino="Servicio" valor={salud.ok ? "en marcha" : "degradado"} bien={salud.ok} />
-      <Fila termino="Base de datos" valor={salud.db} bien={salud.db === "up"} />
-      <Fila termino="Esquema" valor={salud.schema} bien={salud.schema === "ready"} />
-      <Fila termino="Versión" valor={salud.version} bien />
-    </dl>
-  );
-}
 
-function Fila({ termino, valor, bien }: { termino: string; valor: string; bien: boolean }) {
+  if (estado.fase === "sinRed") {
+    return (
+      <main className="mx-auto flex min-h-full w-full max-w-md flex-col justify-center gap-4 px-6 text-center">
+        <h1 className="font-[family-name:var(--font-display)] text-3xl">Sin conexión</h1>
+        <p className="text-[var(--color-tenue)]">
+          No se pudo comprobar tu sesión. No has salido: vuelve a intentarlo cuando tengas cobertura.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setEstado({ fase: "cargando" });
+            preguntar().then(setEstado);
+          }}
+          className="mx-auto rounded-md border border-[var(--color-acento)] px-4 py-3 text-[var(--color-acento)]"
+        >
+          Reintentar
+        </button>
+      </main>
+    );
+  }
+
+  if (estado.fase === "fuera") {
+    return <Acceso alEntrar={(sesion) => setEstado({ fase: "dentro", sesion })} />;
+  }
+
   return (
-    <>
-      <dt className="text-[var(--color-tenue)]">{termino}</dt>
-      <dd className={bien ? "text-[var(--color-acento)]" : "text-amber-300"}>{valor}</dd>
-    </>
+    <Cuenta
+      sesion={estado.sesion}
+      alSalir={() => setEstado({ fase: "fuera" })}
+      alCambiarSesion={(s) => setEstado(s ? { fase: "dentro", sesion: s } : { fase: "fuera" })}
+    />
   );
 }

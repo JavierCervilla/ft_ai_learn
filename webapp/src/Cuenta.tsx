@@ -1,0 +1,289 @@
+import { useEffect, useState } from "react";
+import {
+  emitirInvitacion,
+  ErrorApi,
+  type EstadoInvitaciones,
+  type Invitacion,
+  misInvitaciones,
+  pareceCorreo,
+  revocarInvitacion,
+  salir,
+  type Sesion,
+  sesionActual,
+} from "./api.ts";
+
+/**
+ * Estás dentro.
+ *
+ * De momento la pantalla es tu cuenta y tu círculo: el grafo llega en FTAI-E. Se enseña lo que hoy
+ * se puede **hacer** —invitar, revocar, salir— y no un panel de métricas de adorno.
+ */
+export function Cuenta({
+  sesion,
+  alSalir,
+  alCambiarSesion,
+}: {
+  sesion: Sesion;
+  alSalir: () => void;
+  /** La sesión del navegador resultó ser de otra persona (o ya no existe). Ver `recargar`. */
+  alCambiarSesion: (s: Sesion | null) => void;
+}) {
+  const [estado, setEstado] = useState<EstadoInvitaciones | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [paraQuien, setParaQuien] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const [revocando, setRevocando] = useState<string | null>(null);
+  const [saliendo, setSaliendo] = useState(false);
+  const [recienEmitida, setRecienEmitida] = useState<string | null>(null);
+
+  /**
+   * Relee el círculo **y de paso quién eres**.
+   *
+   * Lo segundo no es celo: la cookie es del navegador entero, no de esta pestaña. Si en otra sales y
+   * entra otra persona, esta pestaña seguía pintando tu nombre y tu cupo mientras la API atendía a
+   * quien de verdad tiene la sesión — el código que aparecía bajo tu nombre se lo apuntaba a ella, con
+   * su cupo, y quien lo usara entraba en **su** círculo (F4/A3 de `qa-adversario`). En un producto
+   * cuya premisa es el círculo cerrado, quién invitó a quién no es presentación.
+   */
+  const recargar = async () => {
+    try {
+      const [quien, invitaciones] = await Promise.all([sesionActual(), misInvitaciones()]);
+      if (quien?.user.id !== sesion.user.id) {
+        alCambiarSesion(quien);
+        return;
+      }
+      setEstado(invitaciones);
+    } catch (fallo) {
+      setError(fallo instanceof ErrorApi ? fallo.message : "No se pudieron leer las invitaciones.");
+    }
+  };
+
+  // La carga inicial va en `.then` y no con `await` dentro del efecto: la regla
+  // `react-hooks/set-state-in-effect` veta el `setState` síncrono en el cuerpo, y el flag `vivo`
+  // evita escribir estado sobre un componente ya desmontado.
+  useEffect(() => {
+    let vivo = true;
+    misInvitaciones()
+      .then((e) => vivo && setEstado(e))
+      .catch((fallo) => {
+        if (vivo) {
+          setError(
+            fallo instanceof ErrorApi ? fallo.message : "No se pudieron leer las invitaciones.",
+          );
+        }
+      });
+    return () => {
+      vivo = false;
+    };
+  }, []);
+
+  const emitir = async () => {
+    const destino = paraQuien.trim();
+    if (destino && !pareceCorreo(destino)) {
+      setError("Eso no parece un correo. Déjalo vacío si la invitación es al portador.");
+      return;
+    }
+    setError(null);
+    setOcupado(true);
+    try {
+      const nueva = await emitirInvitacion(destino || undefined);
+      // **La respuesta dice de quién es.** Si no es de quien esta pantalla lleva rato diciendo que
+      // eres, la sesión cambió en otra pestaña —la cookie es del navegador entero— y enseñar aquí ese
+      // código sería atribuirle a una persona una invitación que ha salido del cupo de otra, y meter
+      // a quien la use en el círculo equivocado (F4/A3). Comprobarlo **con la propia respuesta** y no
+      // con una pregunta aparte es lo que lo cierra: entre preguntar «¿quién soy?» y escribir hay una
+      // carrera, y revalidar al volver a la pestaña la pierde si se pulsa lo bastante rápido.
+      if (nueva.inviterId !== sesion.user.id) {
+        setRecienEmitida(null);
+        await recargar();
+        return;
+      }
+      setRecienEmitida(nueva.code);
+      setParaQuien("");
+      await recargar();
+    } catch (fallo) {
+      setError(fallo instanceof ErrorApi ? fallo.message : "No se pudo emitir la invitación.");
+    } finally {
+      setOcupado(false);
+    }
+  };
+
+  /**
+   * Revocar, con dos cosas que faltaban y que `qa-adversario` puso en rojo.
+   *
+   * **Guarda de reentrada** (F5/A1): el enlace no se deshabilitaba y un doble clic humano mandaba dos
+   * `DELETE`. El primero revocaba; el segundo recibía el 404 deliberadamente ambiguo del §12.4 y
+   * acababa en el aviso rojo. Resultado: la invitación revocada, el cupo devuelto, **y un error
+   * diciendo que no existe**. La ambigüedad que protege el círculo no debería poder mentir sobre lo
+   * que acabas de hacer.
+   *
+   * **Releer también cuando falla** (F6/A4): si alguien consume el código justo antes, el anfitrión
+   * veía el error y la fila **seguía** ahí, «al portador» y con su enlace de revocar, como si la
+   * invitación siguiera viva cuando ya había alguien dentro gracias a ella. Un fallo al revocar es
+   * justo la señal de que tu copia del círculo está vieja.
+   */
+  const revocar = async (code: string) => {
+    if (revocando) return;
+    setError(null);
+    setRevocando(code);
+    try {
+      await revocarInvitacion(code);
+      if (recienEmitida === code) setRecienEmitida(null);
+    } catch (fallo) {
+      setError(fallo instanceof ErrorApi ? fallo.message : "No se pudo revocar.");
+    } finally {
+      await recargar();
+      setRevocando(null);
+    }
+  };
+
+  return (
+    <main className="mx-auto flex min-h-full w-full max-w-md flex-col gap-8 px-6 py-10">
+      <header className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <h1 className="font-[family-name:var(--font-display)] text-3xl leading-tight">
+            {sesion.user.name}
+          </h1>
+          <p className="text-sm text-[var(--color-tenue)]">{sesion.user.email}</p>
+        </div>
+        {/*
+          «Salir» sólo dice que has salido cuando has salido. Tragaba el fallo con un
+          `.catch(() => {})` y llamaba a `alSalir()` igual: con la red caída la app enseñaba la
+          pantalla de acceso mientras **la cookie seguía viva**, y bastaba recargar para estar dentro
+          otra vez. En un móvil con cobertura intermitente —el contexto declarado del producto— eso es
+          creer que has cerrado la sesión en un teléfono que no la ha cerrado. Hallazgo H-2 del rol
+          `qa`; misma clase que la carrera de la revocación en FTAI-D: **una compensación que no
+          pregunta qué pasa si el mundo cambia mientras corre**.
+        */}
+        <button
+          type="button"
+          disabled={saliendo}
+          onClick={async () => {
+            setError(null);
+            setSaliendo(true);
+            try {
+              await salir();
+              alSalir();
+            } catch (fallo) {
+              setError(
+                fallo instanceof ErrorApi
+                  ? `No se pudo cerrar la sesión: ${fallo.message}`
+                  : "No se pudo cerrar la sesión.",
+              );
+            } finally {
+              setSaliendo(false);
+            }
+          }}
+          className="shrink-0 py-2 text-sm text-[var(--color-tenue)] underline underline-offset-4 disabled:opacity-50"
+        >
+          {saliendo ? "…" : "Salir"}
+        </button>
+      </header>
+
+      <section className="flex flex-col gap-4 rounded-xl border border-[var(--color-borde)] bg-[var(--color-panel)] p-5">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-sm font-medium tracking-wide text-[var(--color-tenue)] uppercase">
+            Tu círculo
+          </h2>
+          <span className="text-sm text-[var(--color-tenue)]">
+            {estado ? `${estado.cupo} por repartir` : "…"}
+          </span>
+        </div>
+
+        <div className="flex gap-2">
+          <input
+            value={paraQuien}
+            onChange={(e) => setParaQuien(e.target.value)}
+            placeholder="correo (opcional)"
+            type="email"
+            className="min-w-0 flex-1 rounded-md border border-[var(--color-borde)] bg-[var(--color-fondo)] px-3 py-2 text-[var(--color-tinta)] outline-none focus:border-[var(--color-acento)]"
+          />
+          <button
+            type="button"
+            onClick={emitir}
+            disabled={ocupado || estado?.cupo === 0}
+            className="shrink-0 rounded-md border border-[var(--color-acento)] px-3 py-2 text-sm text-[var(--color-acento)] disabled:opacity-40"
+          >
+            Invitar
+          </button>
+        </div>
+        <p className="text-xs text-[var(--color-tenue)]">
+          Con correo, la invitación sirve <em>sólo</em> para esa persona. Sin correo, la usa quien
+          tenga el código.
+        </p>
+
+        {recienEmitida && (
+          <output className="animate-[aparecer_var(--duracion-entrada)_var(--easing-salida)] rounded-md border border-[var(--color-acento)] bg-[var(--color-fondo)] p-3">
+            <p className="mb-1 text-xs text-[var(--color-tenue)]">
+              Cópialo ahora: no se vuelve a mostrar.
+            </p>
+            <code className="font-[family-name:var(--font-mono)] text-[var(--color-acento)] break-all">
+              {recienEmitida}
+            </code>
+          </output>
+        )}
+
+        {error && (
+          <p role="alert" className="text-sm text-[var(--color-alerta)]">
+            {error}
+          </p>
+        )}
+
+        <ul className="flex flex-col gap-2">
+          {estado?.invitaciones.map((i) => (
+            <Fila
+              key={i.code}
+              invitacion={i}
+              alRevocar={revocar}
+              ocupada={revocando !== null}
+            />
+          ))}
+          {estado?.invitaciones.length === 0 && (
+            <li className="text-sm text-[var(--color-tenue)]">Todavía no has invitado a nadie.</li>
+          )}
+        </ul>
+      </section>
+
+      <p className="text-sm text-[var(--color-tenue)]">
+        El grafo llega en la siguiente trayectoria. De momento esto es tu cuenta y tu círculo.
+      </p>
+    </main>
+  );
+}
+
+/** El estado de una invitación se **deriva** de sus fechas: no hay una columna que pueda discrepar. */
+function estadoDe(i: Invitacion): { texto: string; usada: boolean } {
+  if (i.revokedAt) return { texto: "revocada", usada: true };
+  if (i.usedAt) return { texto: "usada", usada: true };
+  return { texto: i.email ?? "al portador", usada: false };
+}
+
+function Fila({
+  invitacion,
+  alRevocar,
+  ocupada,
+}: {
+  invitacion: Invitacion;
+  alRevocar: (code: string) => void;
+  /** Hay una revocación en vuelo: el botón se apaga de verdad, no sólo se ignora el segundo clic. */
+  ocupada: boolean;
+}) {
+  const { texto, usada } = estadoDe(invitacion);
+  return (
+    <li className="flex items-center justify-between gap-3 border-t border-[var(--color-borde)] pt-2 text-sm">
+      <span className={usada ? "text-[var(--color-apagado)]" : "text-[var(--color-tinta)]"}>
+        {texto}
+      </span>
+      {!usada && (
+        <button
+          type="button"
+          disabled={ocupada}
+          onClick={() => alRevocar(invitacion.code)}
+          className="shrink-0 py-2 text-[var(--color-tenue)] underline underline-offset-4 disabled:opacity-40"
+        >
+          revocar
+        </button>
+      )}
+    </li>
+  );
+}

@@ -24,5 +24,12 @@ export default [
     plugins: { "react-hooks": reactHooks },
     rules: reactHooks.configs.recommended.rules,
   },
+  {
+    // Los scripts de build corren en Node, no en el navegador: sin esto `console` es un `no-undef`.
+    // Se listan a mano en vez de añadir el paquete `globals` — son dos, y una dependencia de
+    // desarrollo también es superficie de suministro.
+    files: ["scripts/**/*.mjs"],
+    languageOptions: { globals: { console: "readonly", process: "readonly" } },
+  },
   ...antiSlop,
 ];
