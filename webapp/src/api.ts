@@ -8,6 +8,8 @@
  * trabajo desde el cliente**, y encima sin que ningún test del servidor se enterase.
  */
 
+import type { Grafo } from "../../core/src/mod.ts";
+
 export interface Sesion {
   user: { id: string; email: string; name: string };
 }
@@ -64,6 +66,18 @@ async function pedir<T>(ruta: string, init: RequestInit = {}): Promise<T> {
 
 /** Un fallo de red, distinguible de cualquier respuesta del servidor. */
 export const SIN_RED = 0;
+
+/**
+ * El grafo de aprendizaje.
+ *
+ * Es **público**: no lleva el progreso de nadie, así que no necesita sesión ni se puede filtrar por él.
+ * Tu progreso vive aparte, en `/api/progress`, y lo trae FTAI-E.3 — separados porque tienen dueños y
+ * duraciones distintas: el grafo es el mismo para todos y cambia con el contenido; el progreso es tuyo
+ * y cambia contigo.
+ */
+export function grafo(): Promise<Grafo> {
+  return pedir<Grafo>("/api/graph");
+}
 
 /**
  * Quién eres, o `null`. Es lo primero que pregunta la app al cargar.

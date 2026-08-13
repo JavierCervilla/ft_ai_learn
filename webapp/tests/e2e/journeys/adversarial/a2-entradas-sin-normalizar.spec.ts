@@ -55,7 +55,9 @@ test("A2 · un código válido pegado con un espacio final sigue siendo una invi
   // Comportamiento CORRECTO: entrar. El código ES el suyo; el espacio no es parte de la invitación y
   // la pantalla es el único sitio donde se puede quitar sin tocar el no-oráculo del servidor.
   await expect(
-    page.getByRole("heading", { name: "Tu círculo" }),
+    // Desde FTAI-E.1, «estar dentro» es ver el mapa. Lo que este recorrido afirma no cambia: que el
+    // espacio final no la deje fuera.
+    page.getByRole("img", { name: "Mapa de competencias" }),
     "el alta se rechaza con el 403 mudo por un espacio al final: la persona invitada se queda fuera " +
       "con la invitación buena y sin ninguna pista de por qué.",
   ).toBeVisible({ timeout: 15000 });

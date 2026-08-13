@@ -18,6 +18,7 @@ import {
   type Problema,
   validar,
 } from "../src/grafo.ts";
+import { disponer } from "../src/disposicion.ts";
 import { radar, scoreEje } from "../src/radar.ts";
 
 // --- Aserciones mínimas -------------------------------------------------------------------------
@@ -335,6 +336,106 @@ export const casos: Caso[] = [
         afirmar(
           posterior.score >= fila.score,
           `sembrar un nodo bajó el eje ${fila.rama.axis}: ${fila.score} → ${posterior.score}`,
+        );
+      }
+    },
+  },
+
+  // --- Disposición del mapa (FTAI-E.1) ------------------------------------------------------------
+  {
+    nombre: "el mapa se dispone igual dos veces, y no depende del orden del fichero",
+    ejecutar() {
+      const g = grafoValido();
+      const una = disponer(g);
+      const otra = disponer(g);
+      igual(JSON.stringify(una), JSON.stringify(otra), "dos llamadas, dos mapas distintos");
+
+      // Reordenar el YAML no puede mover una estrella: el orden sale del `id`, que es lo único que
+      // el contrato promete estable.
+      const revuelto = grafoValido();
+      revuelto.nodes.reverse();
+      igual(
+        JSON.stringify(disponer(revuelto).nodos.map((n) => [n.nodo.id, n.x, n.y])),
+        JSON.stringify(una.nodos.map((n) => [n.nodo.id, n.x, n.y])),
+        "reordenar los nodos movió el mapa",
+      );
+    },
+  },
+  {
+    nombre: "la profundidad manda en el radio: un prerequisito queda más cerca del centro",
+    ejecutar() {
+      const puesto = new Map(disponer(grafoValido()).nodos.map((n) => [n.nodo.id, n]));
+      const r = (id: string) => {
+        const p = puesto.get(id);
+        if (!p) throw new Error(`falta ${id} en la disposición`);
+        return Math.hypot(p.x, p.y);
+      };
+      // a → b → c: cada anillo, más lejos. Es la única lectura que el mapa promete sin leer texto.
+      afirmar(
+        r("a") < r("b"),
+        `a (${r("a").toFixed(0)}) debería estar dentro de b (${r("b").toFixed(0)})`,
+      );
+      afirmar(
+        r("b") < r("c"),
+        `b (${r("b").toFixed(0)}) debería estar dentro de c (${r("c").toFixed(0)})`,
+      );
+    },
+  },
+  {
+    nombre: "dos estrellas nunca se pisan",
+    ejecutar() {
+      const g = grafoValido();
+      // Tres nodos en el MISMO anillo de la misma rama, que es el caso que puede solaparse.
+      g.nodes.push(nodo({ id: "a2" }), nodo({ id: "a3" }), nodo({ id: "a4" }));
+      const nodos = disponer(g).nodos;
+      const MINIMO = 34; // el radio dibujado del nodo más grande, con margen para su etiqueta
+      for (let i = 0; i < nodos.length; i++) {
+        for (let j = i + 1; j < nodos.length; j++) {
+          const a = nodos[i]!, b = nodos[j]!;
+          const d = Math.hypot(a.x - b.x, a.y - b.y);
+          afirmar(
+            d >= MINIMO,
+            `${a.nodo.id} y ${b.nodo.id} se solapan: ${d.toFixed(1)} unidades (mínimo ${MINIMO})`,
+          );
+        }
+      }
+    },
+  },
+  {
+    nombre: "una rama sin nodos se dispone igual, y se sabe que está vacía",
+    ejecutar() {
+      const g = grafoValido();
+      g.branches.push({
+        id: "llms",
+        name: "LLMs",
+        isSpecialization: true,
+        axis: "llms",
+        target: 10,
+      });
+      const { ramas } = disponer(g);
+      igual(ramas.length, 2, "faltan ramas en la disposición");
+      // Las ramas sin contenido son cielo aún sin explorar, no un hueco que haya que esconder: la
+      // pantalla necesita poder distinguirlas para dibujarlas apagadas.
+      igual(ramas.find((r) => r.id === "llms")?.poblada, false, "llms debería estar vacía");
+      igual(ramas.find((r) => r.id === "fundamentos")?.poblada, true, "fundamentos tiene nodos");
+    },
+  },
+  {
+    nombre: "un grafo con un ciclo se dibuja raro, pero NO cuelga",
+    ejecutar() {
+      // El contenido no debería tener ciclos —`validar` y `ciclos` los cazan— pero el dibujo no puede
+      // depender de que el contenido esté sano: una pestaña colgada es peor que un mapa feo.
+      const g = grafoValido();
+      g.nodes.push(
+        nodo({ id: "x", prerequisites: ["y"] }),
+        nodo({ id: "y", prerequisites: ["x"] }),
+      );
+      const nodos = disponer(g).nodos;
+      igual(nodos.length, 5, "el ciclo se comió nodos");
+      for (const n of nodos) {
+        afirmar(
+          Number.isFinite(n.x) && Number.isFinite(n.y),
+          `${n.nodo.id} salió con coordenadas no finitas`,
         );
       }
     },

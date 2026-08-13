@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ErrorApi, type Sesion, sesionActual, SIN_RED } from "./api.ts";
 import { Acceso } from "./Acceso.tsx";
-import { Cuenta } from "./Cuenta.tsx";
+import { Dentro } from "./Dentro.tsx";
 
 /**
  * Quién ve qué.
@@ -100,7 +100,7 @@ export function App() {
   }
 
   return (
-    <Cuenta
+    <Dentro
       sesion={estado.sesion}
       alSalir={() => setEstado({ fase: "fuera" })}
       alCambiarSesion={(s) => setEstado(s ? { fase: "dentro", sesion: s } : { fase: "fuera" })}

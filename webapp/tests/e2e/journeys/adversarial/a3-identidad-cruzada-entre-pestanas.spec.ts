@@ -50,6 +50,11 @@ test("A3 · la pantalla que muestra a Alicia no puede invitar en nombre de Berta
   qa.step("pestaña 2: Alicia sale y entra Berta (misma cookie, otro dueño)");
   const pestana2 = await context.newPage();
   await pestana2.goto("/");
+  // La pestaña 2 abre con la sesión viva, así que aterriza en el mapa; «Salir» vive en la cuenta.
+  await expect(pestana2.getByRole("img", { name: "Mapa de competencias" })).toBeVisible({
+    timeout: 15000,
+  });
+  await pestana2.getByRole("button", { name: "Alicia" }).click();
   await expect(pestana2.getByRole("heading", { name: "Tu círculo" })).toBeVisible({
     timeout: 15000,
   });
@@ -63,7 +68,10 @@ test("A3 · la pantalla que muestra a Alicia no puede invitar en nombre de Berta
   await pestana2.getByLabel("Contraseña").fill(CLAVE);
   await pestana2.getByLabel("Código de invitación").fill(codigo);
   await pestana2.getByRole("button", { name: "Unirse" }).click();
-  await expect(pestana2.getByRole("heading", { name: "Berta" })).toBeVisible({ timeout: 15000 });
+  // A Berta le basta con estar dentro: este recorrido ataca lo que ve la pestaña de Alicia.
+  await expect(pestana2.getByRole("img", { name: "Mapa de competencias" })).toBeVisible({
+    timeout: 15000,
+  });
 
   qa.step("pestaña 1: sigue diciendo «Alicia». Se pulsa Invitar ahí");
   await page.bringToFront();

@@ -82,8 +82,13 @@ test("F3 · unirse con una invitación deja dentro, y F4 · salir y volver a ent
   await page.getByLabel("Código de invitación").fill(codigo);
   await page.getByRole("button", { name: "Unirse" }).click();
 
-  qa.step("aterrizar en la cuenta");
-  await expect(page.getByRole("heading", { name: "Prueba E2E" })).toBeVisible();
+  // Desde FTAI-E.1 entrar deja en **el mapa**, no en la cuenta: la pantalla principal es lo que la
+  // persona viene a hacer. Tu círculo pasa a ser consultable, y se alcanza desde tu nombre.
+  qa.step("aterrizar en el mapa");
+  await expect(page.getByRole("img", { name: "Mapa de competencias" })).toBeVisible();
+
+  qa.step("y desde ahí, tu cuenta");
+  await page.getByRole("button", { name: "Prueba E2E" }).click();
   await expect(page.getByText(correo)).toBeVisible();
 
   qa.step("salir");
@@ -94,11 +99,11 @@ test("F3 · unirse con una invitación deja dentro, y F4 · salir y volver a ent
   await page.getByLabel("Correo").fill(correo);
   await page.getByLabel("Contraseña").fill(CLAVE);
   await page.getByRole("button", { name: "Entrar" }).click();
-  await expect(page.getByRole("heading", { name: "Prueba E2E" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Mapa de competencias" })).toBeVisible();
 
   qa.step("recargar: la sesión sobrevive y no se ve el formulario");
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Prueba E2E" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Mapa de competencias" })).toBeVisible();
 });
 
 test("F5 · emitir y revocar invitaciones, con el cupo a la vista", async ({ page, qa }) => {
@@ -113,7 +118,10 @@ test("F5 · emitir y revocar invitaciones, con el cupo a la vista", async ({ pag
   await page.getByLabel("Contraseña").fill(CLAVE);
   await page.getByLabel("Código de invitación").fill(codigo);
   await page.getByRole("button", { name: "Unirse" }).click();
-  await expect(page.getByRole("heading", { name: "Anfitrión" })).toBeVisible();
+
+  qa.step("desde el mapa, a tu círculo");
+  await expect(page.getByRole("img", { name: "Mapa de competencias" })).toBeVisible();
+  await page.getByRole("button", { name: "Anfitrión" }).click();
 
   qa.step("el cupo inicial está a la vista");
   await expect(page.getByText(/\d+ por repartir/)).toBeVisible();

@@ -78,6 +78,10 @@ export async function unirseDesdeElNavegador(
   await page.getByLabel("Contraseña").fill(CLAVE);
   await page.getByLabel("Código de invitación").fill(codigo);
   await page.getByRole("button", { name: "Unirse" }).click();
+  // Desde FTAI-E.1 el alta deja en el mapa; el círculo se alcanza desde tu nombre. Estos recorridos
+  // atacan las invitaciones, así que navegan hasta ahí y siguen atacando lo mismo que antes.
+  await expect(page.getByRole("img", { name: "Mapa de competencias" })).toBeVisible({ timeout: 15000 });
+  await page.getByRole("button", { name: nombre }).click();
   await expect(page.getByRole("heading", { name: "Tu círculo" })).toBeVisible({ timeout: 15000 });
 }
 
