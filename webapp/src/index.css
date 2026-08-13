@@ -125,3 +125,111 @@ body::before {
     transform: none;
   }
 }
+
+/* -------------------------------------------------------------------------------------------------
+ * El mapa (FTAI-E.1)
+ *
+ * Los estilos viven aquí y no en el componente porque **el gate veta los estilos en línea** — y tiene
+ * razón: un color escrito en el JSX es un color fuera de la capa de tokens. En SVG la *posición* sí
+ * es un atributo
+ * (`cx`, `cy`, `d`), que es dato y no presentación; el color, el grosor y el movimiento salen de aquí.
+ *
+ * Ni un token nuevo: los seis que usa el mapa —`--color-acento`, `--color-halo`, `--color-linea`,
+ * `--color-apagado`, `--color-tenue`, `--color-tinta`— los dejó puestos FTAI-D.2 pensando exactamente
+ * en esta pantalla.
+ * ---------------------------------------------------------------------------------------------- */
+
+.mapa-nodo {
+  cursor: pointer;
+}
+
+.mapa-nodo .cuerpo {
+  fill: url(#estrella);
+}
+
+.mapa-nodo .halo {
+  fill: var(--color-halo);
+  /* El origen en el centro de la propia figura: sin esto, escalar el halo lo manda a otra parte. */
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.mapa-nodo .anillo {
+  fill: none;
+  stroke: var(--color-acento);
+  stroke-width: 0.8;
+  opacity: 0.55;
+}
+
+.mapa-nodo .etiqueta {
+  font-family: var(--font-cuerpo);
+  font-size: 11px;
+  fill: var(--color-tinta);
+  /* La etiqueta acompaña a la estrella: el objetivo táctil es la estrella, no el texto. */
+  pointer-events: none;
+}
+
+/**
+ * Un nodo bloqueado es **una estrella que aún no se ve**, no un botón deshabilitado.
+ *
+ * Sigue siendo pulsable a propósito: al tocarlo dice qué le falta, porque el núcleo lo sabe. Un
+ * control muerto obliga a adivinar, y aquí adivinar es justo lo que el grafo existe para evitar.
+ */
+.mapa-nodo[data-estado="locked"] .cuerpo,
+.mapa-nodo[data-estado="locked"] .anillo {
+  fill: var(--color-apagado);
+  stroke: var(--color-apagado);
+}
+
+.mapa-nodo[data-estado="locked"] .etiqueta {
+  fill: var(--color-apagado);
+}
+
+/* El halo respirando es lo que dice «esto se puede empezar» sin escribirlo en ningún sitio. */
+.mapa-nodo[data-estado="available"] .halo {
+  animation: latir 3.4s ease-in-out infinite;
+}
+
+@keyframes latir {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.18);
+  }
+}
+
+.mapa-nodo:focus-visible {
+  outline: 2px solid var(--color-acento);
+  outline-offset: 3px;
+}
+
+.mapa-aristas path {
+  fill: none;
+  stroke: var(--color-linea);
+  stroke-width: 1.1;
+  opacity: 0.5;
+}
+
+/* Una arista cuyo prerequisito ya está hecho es un camino abierto, y se ve encendida. */
+.mapa-aristas path.abierta {
+  stroke: var(--color-acento);
+  opacity: 0.75;
+}
+
+.mapa-sectores line {
+  stroke: var(--color-borde);
+  stroke-width: 0.5;
+  opacity: 0.35;
+}
+
+.mapa-sectores text {
+  font-family: var(--font-cuerpo);
+  font-size: 9.5px;
+  fill: var(--color-apagado);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}

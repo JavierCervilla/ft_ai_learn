@@ -81,7 +81,9 @@ test("A9 · sin red y en caliente, no se le dice a quien tiene sesión que está
     timeout: 15000,
   });
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Tu círculo" })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole("img", { name: "Mapa de competencias" })).toBeVisible({
+    timeout: 15000,
+  });
 
   qa.step("cortar la red y recargar: la sesión NO ha caducado, sólo falta cobertura");
   await context.setOffline(true);

@@ -11,3 +11,4 @@
 export * from "./tipos.ts";
 export * from "./radar.ts";
 export * from "./grafo.ts";
+export * from "./disposicion.ts";

@@ -273,6 +273,29 @@ jobs:
           cd ..
           kill %1
 
+      # El mapa (G4-G6 de FTAI-E.1), en 390 px. Va en **su propio paso** por la misma razón que los
+      # adversarios tienen el suyo: su `beforeAll` necesita un código de bootstrap y el del paso
+      # anterior ya está gastado. Correrlos juntos no los saltaba en silencio —el `beforeAll` falla en
+      # rojo— pero el rojo sería del entorno, no del mapa, que es la clase de falso hallazgo que este
+      # repo no admite. Un `truncate` + un bootstrap nuevo por paso es barato y deja cada fichero
+      # midiendo lo suyo.
+      - name: Recorridos del mapa (G4-G6) en 390 px
+        run: |
+          deno run -A server/src/main.ts &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8000/health && break || sleep 1; done
+
+          deno eval "
+            const p = (await import('npm:postgres@3.4.5')).default(Deno.env.get('DATABASE_URL'));
+            await p\`truncate user_progress, invitation, user_invite_quota, session, account, \"user\" cascade\`;
+            await p.end();
+          "
+          CODIGO=$(deno task invitar:bootstrap | tail -1)
+
+          cd webapp
+          CODIGO_BOOTSTRAP="$CODIGO" npx playwright test tests/e2e/mapa.spec.ts
+          cd ..
+          kill %1
+
       # Trinquete adversario **de interfaz**: los ocho recorridos que estuvieron en rojo tras el pase
       # de `qa-adversario` sobre FTAI-D.2 (doble clic en revocar, lista congelada tras un fallo,
       # código pegado con un espacio, cupo quemado en un correo inválido, identidad cruzada entre
