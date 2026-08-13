@@ -1,3 +1,5 @@
+import { desbordesDelPiso } from "./admision.ts";
+
 /**
  * El healthcheck.
  *
@@ -14,6 +16,16 @@ export interface Salud {
   /** `ready` = la línea base de migraciones está aplicada. */
   schema: "ready" | "missing" | "unknown";
   version: string;
+  /**
+   * Cuántas respuestas del alta han **superado** su piso temporal (ver `admision.ts`).
+   *
+   * Es el canario de que el no-oráculo por tiempo se sostiene: mientras sea 0, todas las respuestas
+   * de `/api/registro` han salido a la misma hora. Si sube, el piso no está sujetando —o el techo no
+   * está apretando— y el canal se está reabriendo. Sin este número, «se sostiene» es una creencia.
+   *
+   * Es un contador y **nunca lleva correo ni código**: dice cuántas veces, no de quién.
+   */
+  registroDesbordes: number;
 }
 
 /** Sonda de la base. Se inyecta para poder probar el handler sin levantar Postgres. */
@@ -35,5 +47,6 @@ export async function salud(sonda: SondaDb, version: string): Promise<Salud> {
     db: arriba ? "up" : "down",
     schema: arriba ? (esquema ? "ready" : "missing") : "unknown",
     version,
+    registroDesbordes: desbordesDelPiso(),
   };
 }

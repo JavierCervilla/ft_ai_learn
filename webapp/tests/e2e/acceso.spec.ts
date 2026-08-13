@@ -142,7 +142,10 @@ test("F3b · un código que no vale no dice POR QUÉ no vale", async ({ page, qa
   await page.getByLabel("Correo").fill(`e2e-malo-${sello()}@ejemplo.test`);
   await page.getByLabel("Nombre").fill("No entra");
   await page.getByLabel("Contraseña").fill(CLAVE);
-  await page.getByLabel("Código de invitación").fill("codigo-que-no-existe-jamas");
+  // **Con forma válida** (22 caracteres base64url) y a la vez inexistente. Desde FTAI-D.3 el cliente
+  // descarta lo que ni siquiera tiene forma de código sin preguntar al servidor, así que un literal
+  // cualquiera ya no llegaría hasta aquí — y este recorrido mide el mensaje del **servidor**.
+  await page.getByLabel("Código de invitación").fill("QUEnoEXISTEjamasAAAAAA");
   await page.getByRole("button", { name: "Unirse" }).click();
 
   qa.step("se queda fuera, con el mensaje genérico del servidor");

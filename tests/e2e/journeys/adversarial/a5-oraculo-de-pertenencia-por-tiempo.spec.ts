@@ -1,50 +1,47 @@
 /**
- * Recorrido adversario · A5 (canal lateral) · FTAI-D.2
+ * Recorrido adversario · A5 (canal lateral) · FTAI-D.2 → arreglado en FTAI-D.3
  *
- * ⚠️ **ESTE RECORRIDO ESTÁ ROJO A PROPÓSITO: el hallazgo NO está arreglado.**
+ * PROMESA ATACADA (§12.4): «todos los desenlaces fallidos del alta son indistinguibles».
  *
- * Se commitea rojo porque es la única reproducción de un fallo que **ya está vivo en producción**
- * —viene de `/api/registro`, que se mergeó en FTAI-D— y borrarlo para tener el árbol en verde sería
- * cambiar la evidencia por la apariencia. **No está enganchado a CI** (el paso del trinquete nombra
- * los ficheros uno a uno, y `deno test` no descubre `*.spec.ts` por su cuenta), así que no pone rojo
- * el PR de D.2 ni se cuela sin que alguien lo invoque.
+ * HALLAZGO ORIGINAL: lo eran **por lo que se ve** —mismo 403, mismos 40 bytes, mismas cabeceras— y no
+ * por lo que se tarda. `registro.ts` tenía tres caminos con costes de otro orden de magnitud:
  *
- * Va en su propia trayectoria, **FTAI-D.3**, porque el arreglo es de servidor y de seguridad —hacer
- * que los dos caminos cuesten lo mismo, con su medición— y no cabe honestamente en un PR de interfaz.
- * `qa-adversario` lo escaló al rol `seguridad`, y el veredicto de severidad es suyo, no mío.
- * Cuando se arregle, este fichero pasa a verde y se engancha al trinquete como los demás.
+ *   · código inválido ........  ~2 ms   muere en `consumir`, antes de tocar nada caro
+ *   · correo YA MIEMBRO ......  ~8 ms   Better Auth ve el usuario y corta ANTES de hashear
+ *   · correo DESCONOCIDO ..... ~320 ms  hashea Argon2id y revienta después, en el INSERT
  *
- * HALLAZGO: el **oráculo de pertenencia que `seguridad` cerró en FTAI-D sigue abierto, por el reloj**.
+ * Las poblaciones **no solapaban** (max del rápido 24 ms, min del lento 300 ms): no es un sesgo que
+ * haya que promediar sino un clasificador determinista **de una sola petición**. Y las sondas eran
+ * ilimitadas, porque un alta fallida libera el código.
  *
- * `registro.ts` unificó a propósito TODOS los desenlaces fallidos del alta en un 403 con el mismo
- * cuerpo (`{"error":"no se pudo completar el alta"}`) para que nadie pueda preguntarle a la API si
- * fulano está en el círculo. El rol `qa` verificó los cuatro caminos y son idénticos: mismo código,
- * mismo texto. Lo que nadie midió es **cuánto tarda cada uno**.
+ * UMBRAL: lo fija el rol `seguridad`, no este fichero. Rechazó el `RATIO_MAXIMO=3` que traía el pase
+ * adversario por dos motivos que conviene no volver a discutir:
  *
- * LA SONDA (una sola invitación, reutilizable indefinidamente):
- *   POST /api/registro { email: <objetivo>, password: <válida>, name: "a\0b", inviteCode: <válido> }
+ *   1. **Laxo donde importa.** Con el piso en 800 ms, un ratio de 3 admite 1600 ms de diferencia. La
+ *      señal que estamos matando son 300 ms: el test pasaría con el fallo intacto.
+ *   2. **Forma equivocada de medida.** Un cociente entre magnitudes de milisegundos es ruido: 2,2 vs
+ *      7,5 ms ya da 3,4× por una diferencia de 5 ms que a través de internet es irresoluble. El
+ *      criterio principal tiene que ser un **tamaño de efecto absoluto**, no una significancia — un
+ *      test estadístico declara «significativos» 3 ms consistentes, y eso es una fábrica de rojos
+ *      intermitentes, que acaban en `continue-on-error`.
  *
- *   El NUL en `name` hace que el alta esté condenada a fallar SIEMPRE, así que el desenlace visible
- *   es siempre el mismo 403 — y como un alta fallida **libera** el código (compensación de
- *   `registrar`), la misma invitación sirve para sondas ilimitadas. Lo único que cambia es el reloj:
+ * Criterio aceptado: **d ≤ 50 ms** entre la mediana mayor y la menor de las TRES poblaciones, y como
+ * red secundaria **r ≤ 1,5** con guarda de 10 ms —que cubre el caso de «igualar hacia abajo» (8 vs
+ * 30 ms pasaría por `d` y no por `r`) sin que el cociente muerda cuando las medianas son diminutas—.
+ * 50 ms deja entre 2× y 10× de margen sobre el ruido de un runner compartido y sigue estando 6× por
+ * debajo de la señal a matar.
  *
- *     · objetivo YA REGISTRADO   → Better Auth ve el usuario existente y corta ANTES de hashear.
- *     · objetivo DESCONOCIDO     → hashea la contraseña con Argon2id y revienta después, en el INSERT.
- *
- *   Medido en staging local: **~9 ms** frente a **~383 ms** (mediana de 6 sondas cada una). No es un
- *   sesgo estadístico que haya que promediar a lo largo de miles de peticiones: son dos poblaciones
- *   separadas por un factor 40 que se distinguen **con una sola petición**. Cualquiera con una
- *   invitación puede recorrer una lista de correos y saber quién está dentro, que es exactamente la
- *   pregunta que §12.4 prohíbe responder — y en un producto cuya premisa de privacidad ES el círculo
- *   cerrado, la pertenencia es el dato.
- *
- * ESCALADO al rol `seguridad`: la frontera que se cae es la misma que cerró el pase de seguridad de
- * FTAI-D (aquél por el código de estado, éste por la latencia). El veredicto de severidad no es del
- * pase adversario.
+ * TRES poblaciones y no dos: la versión anterior sólo comparaba miembro↔desconocido, y **habría dado
+ * verde con el oráculo del destinatario de una invitación nominal abierto** (que es la separación
+ * A↔B/C). El arreglo aplana las tres y el gate tiene que verlas.
  *
  * ENTORNO (nunca contra producción):
  *   COOKIE_HOST  — cookie de sesión de un anfitrión con cupo (para acuñar la invitación de la sonda).
- *   SONDAS       — repeticiones por población (por defecto 7).
+ *   SONDAS       — repeticiones por población (por defecto 15).
+ *   REGISTRO_MAX_POR_IP — **en el servidor**: este recorrido emite ~54 altas desde una sola IP y el
+ *                  límite por defecto (10/min) lo bloquearía. El paso de CI lo afloja de forma
+ *                  explícita y visible. Un gate que sólo puede correr desactivando en silencio la
+ *                  defensa que valida es un gate que alguien borra al mes.
  *
  *   COOKIE_HOST='better-auth.session_token=…' BASE_URL_TEST=http://localhost:8010 \
  *     deno test -A tests/e2e/journeys/adversarial/a5-oraculo-de-pertenencia-por-tiempo.spec.ts
@@ -53,15 +50,19 @@ import { assert } from "jsr:@std/assert";
 
 const BASE = Deno.env.get("BASE_URL_TEST") ?? "http://localhost:8000";
 const COOKIE_HOST = Deno.env.get("COOKIE_HOST") ?? "";
-const SONDAS = Number(Deno.env.get("SONDAS") ?? 7);
+const SONDAS = Number(Deno.env.get("SONDAS") ?? 15);
+const CALENTAMIENTO = 3;
 const H = { "content-type": "application/json", origin: BASE };
 const CLAVE = "contrasena-larga-de-prueba";
 
 /** NUL en el nombre: pasa la validación y revienta en el INSERT, o sea SIEMPRE tras el hasheo. */
 const NOMBRE_CONDENADO = `a${String.fromCharCode(0)}b`;
 
-/** Umbral de indistinguibilidad: por debajo de esto el reloj no dice nada útil de una sola sonda. */
-const RATIO_MAXIMO = 3;
+/** Diferencia máxima entre medianas, en ms. Criterio **principal**: tamaño de efecto, no significancia. */
+const DIFERENCIA_MAXIMA_MS = 50;
+/** Red secundaria contra «igualar hacia abajo», con su guarda para que el cociente no muerda en el ruido. */
+const RATIO_MAXIMO = 1.5;
+const GUARDA_RATIO_MS = 10;
 
 function mediana(xs: number[]): number {
   const s = [...xs].sort((a, b) => a - b);
@@ -69,7 +70,10 @@ function mediana(xs: number[]): number {
   return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
 }
 
-async function sondar(email: string, code: string): Promise<{ estado: number; ms: number; cuerpo: string }> {
+async function sondar(
+  email: string,
+  code: string,
+): Promise<{ estado: number; ms: number; cuerpo: string }> {
   const t0 = performance.now();
   const r = await fetch(`${BASE}/api/registro`, {
     method: "POST",
@@ -83,7 +87,6 @@ async function sondar(email: string, code: string): Promise<{ estado: number; ms
 Deno.test("A5 · el tiempo de respuesta del alta no debe delatar quién está en el círculo", async () => {
   assert(COOKIE_HOST, "falta COOKIE_HOST (cookie de sesión de un anfitrión con cupo)");
 
-  // Un miembro de verdad al que preguntar por él, y una invitación con la que preguntar.
   const sello = `${Date.now()}-${Math.floor(Math.random() * 1e4)}`;
   const nueva = async () => {
     const r = await fetch(`${BASE}/api/invitations`, {
@@ -95,61 +98,92 @@ Deno.test("A5 · el tiempo de respuesta del alta no debe delatar quién está en
     return (await r.json() as { code: string }).code;
   };
 
+  // Un miembro de verdad por el que preguntar, y una invitación con la que preguntar.
   const miembro = `miembro-${sello}@ejemplo.test`;
   const alta = await fetch(`${BASE}/api/registro`, {
     method: "POST",
     headers: H,
-    body: JSON.stringify({ email: miembro, password: CLAVE, name: "Miembro", inviteCode: await nueva() }),
+    body: JSON.stringify({
+      email: miembro,
+      password: CLAVE,
+      name: "Miembro",
+      inviteCode: await nueva(),
+    }),
   });
   assert(alta.ok, `no se pudo crear el miembro objetivo (${alta.status})`);
 
   const codigoSonda = await nueva();
 
-  const dentro: number[] = [];
-  const fuera: number[] = [];
+  /**
+   * Las tres poblaciones. Las tres con el nombre condenado, así que **por lo que se ve** son la misma
+   * respuesta: si alguna dejara de serlo, el hallazgo sería otro y este recorrido no lo mide.
+   */
+  const poblaciones = [
+    {
+      nombre: "código inválido",
+      sondar: (i: number) =>
+        sondar(`quienquiera-${sello}-${i}@ejemplo.test`, "codigo-que-no-existe-jamas"),
+    },
+    { nombre: "correo YA MIEMBRO", sondar: (_i: number) => sondar(miembro, codigoSonda) },
+    {
+      nombre: "correo DESCONOCIDO",
+      sondar: (i: number) => sondar(`desconocido-${sello}-${i}@ejemplo.test`, codigoSonda),
+    },
+  ];
+
+  const muestras: number[][] = poblaciones.map(() => []);
   const cuerpos = new Set<string>();
   const estados = new Set<number>();
 
-  for (let i = 0; i < SONDAS; i++) {
-    const a = await sondar(miembro, codigoSonda);
-    const b = await sondar(`desconocido-${sello}-${i}@ejemplo.test`, codigoSonda);
-    dentro.push(a.ms);
-    fuera.push(b.ms);
-    for (const r of [a, b]) {
+  // **En rotación**, no en bloques: cualquier deriva de la máquina (otro job, un GC, el planificador)
+  // afecta por igual a las tres poblaciones. Medir A entera y luego C entera regala la deriva a una.
+  for (let i = 0; i < CALENTAMIENTO + SONDAS; i++) {
+    for (const [p, poblacion] of poblaciones.entries()) {
+      const r = await poblacion.sondar(i);
+      // El calentamiento se descarta: la primera invocación de Argon2 paga compilación JIT y la
+      // primera petición paga la conexión. Medirlas sería medir el arranque, no el canal.
+      if (i >= CALENTAMIENTO) muestras[p]!.push(r.ms);
       cuerpos.add(r.cuerpo);
       estados.add(r.estado);
     }
   }
 
-  // Premisa del ataque: por lo que se VE, las dos poblaciones son la misma respuesta. Si esto fallara,
-  // el hallazgo sería otro (el oráculo estaría en el texto, que es lo que `qa` ya comprobó que no).
+  // Premisa del ataque: por lo que se VE, las tres son la misma respuesta. Si esto falla, el hallazgo
+  // sería otro (el oráculo estaría en el texto, que es lo que `qa` ya comprobó que no).
   assert(
     cuerpos.size === 1 && estados.size === 1,
     `la sonda dejó de ser ciega: estados=${[...estados]} cuerpos=${[...cuerpos]}`,
   );
 
-  // La invitación no se gasta: por eso el oráculo es ilimitado y no «un bit por invitación».
-  const sigueViva = await fetch(`${BASE}/api/registro`, {
-    method: "POST",
-    headers: H,
-    body: JSON.stringify({
-      email: `superviviente-${sello}@ejemplo.test`,
-      password: CLAVE,
-      name: "Superviviente",
-      inviteCode: codigoSonda,
-    }),
-  });
+  const medianas = muestras.map(mediana);
+  const alta_ = Math.max(...medianas);
+  const baja = Math.min(...medianas);
+  const diferencia = alta_ - baja;
+  const ratio = alta_ / Math.max(1, baja);
 
-  const mDentro = mediana(dentro);
-  const mFuera = mediana(fuera);
-  const ratio = Math.max(mDentro, mFuera) / Math.max(1, Math.min(mDentro, mFuera));
+  // Si algún día parpadea, hay que poder decidir si fue ruido o señal **sin volver a montar nada**.
+  const detalle = poblaciones
+    .map((p, i) =>
+      `  ${p.nombre}: mediana ${medianas[i]!.toFixed(1)} ms · ${
+        muestras[i]!.map((m) => m.toFixed(0)).join(",")
+      }`
+    )
+    .join("\n");
 
   assert(
-    ratio < RATIO_MAXIMO,
-    `oráculo de pertenencia por tiempo: un correo YA REGISTRADO responde en ${mDentro.toFixed(1)} ms ` +
-      `y uno DESCONOCIDO en ${mFuera.toFixed(1)} ms (ratio ${ratio.toFixed(1)}×), con el MISMO 403 y ` +
-      `el MISMO cuerpo. ${SONDAS * 2} sondas gastaron 0 invitaciones (el código seguía ` +
-      `${sigueViva.ok ? "vivo" : "muerto"} al terminar): cualquiera con una invitación puede ` +
-      "enumerar quién pertenece al círculo, que es justo lo que §12.4 cierra.",
+    diferencia <= DIFERENCIA_MAXIMA_MS,
+    `oráculo de pertenencia por TIEMPO: las medianas se separan ${diferencia.toFixed(1)} ms ` +
+      `(máximo ${DIFERENCIA_MAXIMA_MS}) con el MISMO estado y el MISMO cuerpo en las tres poblaciones. ` +
+      `Cualquiera con una invitación puede preguntar si un correo está en el círculo, que es justo lo ` +
+      `que §12.4 cierra.\n${detalle}`,
+  );
+
+  assert(
+    ratio <= RATIO_MAXIMO || diferencia <= GUARDA_RATIO_MS,
+    `las medianas difieren ${ratio.toFixed(2)}× (máximo ${RATIO_MAXIMO}) con ${
+      diferencia.toFixed(1)
+    } ms ` +
+      `de separación: alguien ha «igualado hacia abajo» y el canal sigue abierto en magnitudes ` +
+      `pequeñas.\n${detalle}`,
   );
 });

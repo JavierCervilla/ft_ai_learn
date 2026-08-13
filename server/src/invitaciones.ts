@@ -39,14 +39,32 @@ export interface Invitacion {
   inviterId: string;
 }
 
-/** Código opaco y aleatorio. Nunca correlativo: un id adivinable es una invitación regalada (§12.4). */
+/**
+ * Código opaco y aleatorio. Nunca correlativo: un id adivinable es una invitación regalada (§12.4).
+ *
+ * **No empieza nunca por `-`.** El alfabeto base64url lo incluye, y un guion inicial es una trampa de
+ * usabilidad con consecuencias reales: se lo comen la selección al copiar, los clientes de correo que
+ * lo interpretan como viñeta, y cualquier terminal que lo lea como una opción. Le pasó a la primera
+ * invitación del producto —llegó con 21 caracteres en vez de 22— y el 403 deliberadamente
+ * indistinguible del alta hizo que no hubiera forma de saber por qué no entraba: la protección
+ * correcta frente a un desconocido deja a la persona invitada sin ninguna pista.
+ *
+ * Se reintenta en vez de mapear el primer carácter a otra cosa: mapearlo sesgaría la distribución del
+ * primer byte, y aquí lo que se está gastando es entropía. La probabilidad de repetir es 1/64 por
+ * intento, así que el bucle termina enseguida; el tope existe sólo para que no pueda ser infinito si
+ * algún día alguien rompe el generador de aleatorios.
+ *
+ * Los códigos **ya emitidos siguen valiendo**: esto sólo cambia lo que se acuña a partir de ahora.
+ */
 export function generarCodigo(): string {
-  const bytes = new Uint8Array(BYTES_CODIGO);
-  crypto.getRandomValues(bytes);
-  return btoa(String.fromCharCode(...bytes)).replaceAll("+", "-").replaceAll("/", "_").replaceAll(
-    "=",
-    "",
-  );
+  for (let intento = 0; intento < 8; intento++) {
+    const bytes = new Uint8Array(BYTES_CODIGO);
+    crypto.getRandomValues(bytes);
+    const codigo = btoa(String.fromCharCode(...bytes)).replaceAll("+", "-").replaceAll("/", "_")
+      .replaceAll("=", "");
+    if (!codigo.startsWith("-")) return codigo;
+  }
+  throw new Error("no se pudo generar un código utilizable");
 }
 
 /** Cuánto le queda por invitar a alguien. */

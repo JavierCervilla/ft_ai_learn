@@ -4,7 +4,17 @@ import type { Grafo } from "@ftai/core";
 import { type Auth, usuarioDe } from "./auth.ts";
 import { cupoDe, emitir, listar, revocar } from "./invitaciones.ts";
 import { type Marca, marcar, vistaDe } from "./progreso.ts";
-import { registrar } from "./registro.ts";
+import { ALTA_RECHAZADA, registrar } from "./registro.ts";
+import {
+  ALTAS_EN_VUELO,
+  conPiso,
+  ipDe,
+  LimitePorIp,
+  MAX_POR_IP,
+  PISO_MS,
+  Semaforo,
+  VENTANA_S,
+} from "./admision.ts";
 
 /**
  * Las rutas que tienen dueño.
@@ -16,6 +26,16 @@ import { registrar } from "./registro.ts";
 
 /** Respuesta única para «no existe» y «no es tuyo», que no se distinguen a propósito (§12.4). */
 const NO_ENCONTRADO = { error: "no encontrado" };
+
+/**
+ * Control de admisión del alta, uno por proceso. Ver `admision.ts` para el porqué de cada pieza.
+ *
+ * Van en el módulo y no dentro de `montarRutas` para que su estado —los cubos por IP y las plazas en
+ * vuelo— sea el del servidor y no el de una llamada: montar las rutas dos veces no debe regalar el
+ * doble de cupo.
+ */
+const limiteRegistro = new LimitePorIp(MAX_POR_IP, VENTANA_S * 1000);
+const altasEnVuelo = new Semaforo(ALTAS_EN_VUELO);
 
 /** Métodos que cambian estado y por tanto exigen `Origin` propio (los de lectura no lo necesitan). */
 const METODOS_MUTANTES = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -156,31 +176,64 @@ export function montarRutas(router: Router, { sql, auth, baseUrl, leerGrafo }: D
     await volcar(ctx, await enEspanol(await auth.handler(peticion)));
   });
 
-  /** El alta con invitación. Ver `registro.ts` para el orden de los pasos y por qué es ese. */
-  router.post("/api/registro", async (ctx) => {
-    const cuerpo = await ctx.request.body.json().catch(() => null) as
-      | Record<string, unknown>
-      | null;
-    // Se exige que sean **cadenas**, no sólo que estén: el cuerpo es JSON de fuera y puede traer
-    // booleanos, números u objetos en cualquier campo.
-    const texto = (v: unknown) => typeof v === "string" && v !== "" ? v : null;
-    const email = texto(cuerpo?.email);
-    const password = texto(cuerpo?.password);
-    const name = texto(cuerpo?.name);
-    if (!email || !password || !name) {
-      ctx.response.status = 400;
-      ctx.response.body = { error: "faltan email, password o name" };
-      return;
-    }
-    const resultado = await registrar({
-      sql,
-      auth,
-      peticion: { email, password, name, inviteCode: cuerpo?.inviteCode },
-    });
-    ctx.response.status = resultado.estado;
-    for (const cookie of resultado.cookies) ctx.response.headers.append("set-cookie", cookie);
-    ctx.response.body = resultado.cuerpo;
-  });
+  /**
+   * El alta con invitación. Ver `registro.ts` para el orden de los pasos y por qué es ese, y
+   * `admision.ts` para por qué toda esta ruta va envuelta en un piso temporal.
+   *
+   * El envoltorio cubre la ruta **entera**: el éxito y el 400 también, no sólo los 403. No es que el
+   * éxito sea secreto —gasta el código, así que filtra como mucho un bit por invitación, y eso está
+   * aceptado desde FTAI-D— sino que *(a)* esta ruta **no comprueba `Origin`**, así que una página
+   * ajena puede lanzarla en modo opaco y **cronometrarla sin leerla**, y ahí un éxito rápido volvería
+   * a ser un discriminador; y *(b)* «toda respuesta de esta ruta sale a la misma hora» es una regla
+   * que nadie puede romper sin darse cuenta, mientras que «todas menos dos» es una lista de
+   * excepciones esperando a que alguien añada la tercera. Cuesta 800 ms una vez en la vida de cada
+   * persona.
+   */
+  router.post("/api/registro", (ctx) =>
+    conPiso(PISO_MS, async () => {
+      if (!limiteRegistro.admite(ipDe(ctx.request.headers, ctx.request.ip))) {
+        ctx.response.status = 429;
+        ctx.response.body = { error: "demasiados intentos: espera un momento" };
+        return;
+      }
+
+      const cuerpo = await ctx.request.body.json().catch(() => null) as
+        | Record<string, unknown>
+        | null;
+      // Se exige que sean **cadenas**, no sólo que estén: el cuerpo es JSON de fuera y puede traer
+      // booleanos, números u objetos en cualquier campo.
+      const texto = (v: unknown) => typeof v === "string" && v !== "" ? v : null;
+      const email = texto(cuerpo?.email);
+      const password = texto(cuerpo?.password);
+      const name = texto(cuerpo?.name);
+      if (!email || !password || !name) {
+        ctx.response.status = 400;
+        ctx.response.body = { error: "faltan email, password o name" };
+        return;
+      }
+
+      // El techo se coge **antes de `registrar`**, no alrededor del hasheo: así un descarte no ha
+      // tocado nada —ni consumido el código ni creado nada que compensar— y la respuesta es la misma
+      // que cualquier otro fallo. Bajo saturación la ruta contesta lo mismo a la misma hora, que es
+      // uniforme por construcción.
+      if (!altasEnVuelo.intentar()) {
+        ctx.response.status = 403;
+        ctx.response.body = ALTA_RECHAZADA;
+        return;
+      }
+      try {
+        const resultado = await registrar({
+          sql,
+          auth,
+          peticion: { email, password, name, inviteCode: cuerpo?.inviteCode },
+        });
+        ctx.response.status = resultado.estado;
+        for (const cookie of resultado.cookies) ctx.response.headers.append("set-cookie", cookie);
+        ctx.response.body = resultado.cuerpo;
+      } finally {
+        altasEnVuelo.soltar();
+      }
+    }));
 
   // --- Progreso ----------------------------------------------------------------------------------
 
