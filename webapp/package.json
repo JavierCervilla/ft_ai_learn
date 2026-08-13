@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "iconos": "node ../scripts/generar-iconos.mjs public/icons"
   },
   "dependencies": {

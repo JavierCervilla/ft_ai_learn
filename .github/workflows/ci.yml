@@ -244,6 +244,28 @@ jobs:
 
           kill %1
 
+      # Los recorridos de interfaz corren contra ESTE servidor: el mismo que sirve el bundle estático
+      # y la API, con su base de verdad. Un `serve dist` con la API mockeada probaría el mock, y lo
+      # que hay que probar es que el formulario habla con el backend — que es justo lo que faltaba.
+      - name: Recorridos de acceso (F3-F5) en navegador
+        run: |
+          (cd webapp && npm ci --no-audit --no-fund && npm run build)
+          deno run -A server/src/main.ts &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8000/health && break || sleep 1; done
+
+          deno eval "
+            const p = (await import('npm:postgres@3.4.5')).default(Deno.env.get('DATABASE_URL'));
+            await p\`truncate user_progress, invitation, user_invite_quota, session, account, \"user\" cascade\`;
+            await p.end();
+          "
+          CODIGO=$(deno task invitar:bootstrap | tail -1)
+
+          cd webapp
+          npx playwright install --with-deps chromium
+          CODIGO_BOOTSTRAP="$CODIGO" npm run test:e2e
+          cd ..
+          kill %1
+
       - name: El bootstrap se cierra en cuanto hay alguien
         run: |
           # La puerta de servicio no se puede volver a abrir: si esto dejara de fallar, cualquiera con
@@ -271,6 +293,14 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: Lint anti-slop (ESLint + sonarjs — skill code-anti-slop)
         run: npm run lint
+
+      # El gate de INTERFAZ, que es otro: el de arriba mira el código, éste mira el diseño (tokens
+      # OKLCH, fuentes de marca, hex sueltos, estilos inline). Faltaba desde FTAI-B pese a que el
+      # nombre del job dice «anti-slop», y al enchufarlo salieron 6 violaciones duras en los tokens
+      # de la semilla. Corre desde la raíz porque el script vendorizado vive fuera de `webapp/`.
+      - name: Anti-slop de interfaz (skill frontend-anti-slop, vendorizada)
+        working-directory: .
+        run: bash .frontend-anti-slop/scripts/audit-anti-slop.sh webapp/src
       - name: Build (tsc de la app + tsc del service worker + los dos builds de Vite)
         run: npm run build
 

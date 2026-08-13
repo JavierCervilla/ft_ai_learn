@@ -1,0 +1,13 @@
+# Fuentes genéricas vetadas como fuente DE MARCA (slop tipográfico).
+# Un patrón grep por línea. Lineas vacias y las que empiezan por # se ignoran.
+# Eje: Tipografia | Severidad: dura.
+# Detecta su uso en font-family, --font-*, o clases Tailwind de fuente.
+\bInter\b
+\bRoboto\b
+\bArial\b
+\bHelvetica\b
+\bOpen Sans\b
+\bLato\b
+# system-ui declarado como eleccion de marca (font-family / --font-* / font-sans)
+font-family:[^;}]*system-ui
+--font[a-zA-Z-]*:[^;}]*system-ui
