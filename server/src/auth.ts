@@ -81,6 +81,26 @@ export function crearAuth({ sql, secreto, baseUrl }: OpcionesAuth) {
      * cambie una línea de código, y que no se ve leyendo este fichero.
      */
     rateLimit: { enabled: true, window: 60, max: 20 },
+    /**
+     * **El logger no repite los argumentos del error**, y ésa es la única razón de que exista.
+     *
+     * El pase de `seguridad` encontró que cada alta condenada a fallar volcaba a stdout el error de
+     * Postgres **con los parámetros de la consulta, incluido el correo objetivo**. O sea: los correos
+     * que un tercero está sondeando quedaban escritos en los logs de producción —que ve cualquiera con
+     * acceso al panel de Dokploy—, convirtiendo un canal lateral en un registro permanente del
+     * ataque, con nombres. Y de paso ~2 KB de log por petición es amplificación gratis.
+     *
+     * Se conserva el **mensaje**, que es lo que sirve para diagnosticar, y se tiran los `...args`, que
+     * es donde viajan los datos. `seguridad` comprobó de paso que ahí no aparecía material de
+     * credenciales (0 ocurrencias de `argon2id$`): el INSERT que revienta es el de `user`, no el de
+     * `account`. Aun así, la regla es la misma: un log no es un sitio donde poner datos de nadie.
+     */
+    logger: {
+      disabled: false,
+      log(nivel: string, mensaje: string) {
+        console.error(`[auth:${nivel}] ${mensaje}`);
+      },
+    },
   });
 }
 

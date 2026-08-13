@@ -106,7 +106,9 @@ Deno.test("A1 · una carrera no debe derrotar la revocación ni quemar el cupo d
     if (rev.status !== 200 && alta.status === 200) {
       rotos++;
       if (evidencia.length < 3) {
-        evidencia.push(`ronda ${k}: revocar=${rev.status} (cupo NO devuelto) · alta-posterior=201/200 con el código "revocado"`);
+        evidencia.push(
+          `ronda ${k}: revocar=${rev.status} (cupo NO devuelto) · alta-posterior=201/200 con el código "revocado"`,
+        );
       }
     }
   }

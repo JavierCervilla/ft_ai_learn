@@ -131,6 +131,25 @@ export function pareceCorreo(v: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 }
 
+/** Longitud exacta de un código: 16 bytes en base64url, sin relleno. */
+export const LARGO_CODIGO = 22;
+
+/**
+ * ¿Tiene **forma** de código de invitación?
+ *
+ * Es una comprobación **sintáctica**, no de pertenencia, y esa distinción es la que la hace legítima:
+ * el formato es público —se ve en cualquier código— así que decir «esto no tiene forma de código» no
+ * responde nada sobre quién está en el círculo. El servidor sigue devolviendo su 403 indistinguible
+ * para todo lo demás, y aquí no se toca.
+ *
+ * Existe porque a la primera invitación del producto le faltaba el guion inicial al copiarla, y el no
+ * -oráculo —correcto frente a un desconocido— dejó a la persona invitada mirando un mensaje mudo sin
+ * ninguna pista. Un código de 21 caracteres no hace falta mandarlo al servidor para saber que no vale.
+ */
+export function pareceCodigo(v: string): boolean {
+  return new RegExp(`^[A-Za-z0-9_-]{${LARGO_CODIGO}}$`).test(v);
+}
+
 export function revocarInvitacion(code: string): Promise<{ cupo: number }> {
   return pedir<{ cupo: number }>(`/api/invitations/${encodeURIComponent(code)}`, {
     method: "DELETE",

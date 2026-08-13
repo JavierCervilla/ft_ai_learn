@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from "react";
-import { entrar, ErrorApi, registrarse, type Sesion } from "./api.ts";
+import { entrar, ErrorApi, LARGO_CODIGO, pareceCodigo, registrarse, type Sesion } from "./api.ts";
 
 /**
  * La entrada al mapa.
@@ -28,6 +28,20 @@ export function Acceso({ alEntrar }: { alEntrar: (s: Sesion) => void }) {
     setError(null);
     setEnviando(true);
     try {
+      // El código se comprueba **de forma** antes de salir: 22 caracteres base64url. No es una
+      // comprobación de pertenencia —el formato es público— así que no deshace nada del no-oráculo;
+      // es la diferencia entre «esto no vale» y «esto ni siquiera es un código». Sin ella, a la
+      // primera invitación del producto le faltó el guion inicial al copiarla y el 403 mudo del
+      // servidor no tenía forma de decirlo.
+      if (modo === "unirse" && !pareceCodigo(inviteCode.trim())) {
+        setError(
+          `Ese código no tiene la forma de un código de invitación: son ${LARGO_CODIGO} caracteres. ` +
+            "Comprueba que lo has copiado entero.",
+        );
+        setEnviando(false);
+        return;
+      }
+
       // `trim()` en correo y código, y **no** en la contraseña: un espacio ahí puede ser parte de la
       // clave y recortarlo cambiaría el secreto de la persona. El código sí se recorta porque copiarlo
       // desde un chat —o desde el propio `<code>` de la pantalla, que además avisa de que no se vuelve

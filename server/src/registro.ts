@@ -46,7 +46,7 @@ export interface ResultadoRegistro {
  * hay que proteger, y §12.4 pide justamente errores que no distingan. Ahora el único desenlace
  * distinguible es el éxito, y ése **gasta el código**: como mucho un bit por invitación.
  */
-const ALTA_RECHAZADA = { error: "no se pudo completar el alta" };
+export const ALTA_RECHAZADA = { error: "no se pudo completar el alta" };
 
 export async function registrar(
   { sql, auth, peticion }: { sql: Sql; auth: Auth; peticion: PeticionRegistro },
