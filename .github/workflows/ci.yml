@@ -262,7 +262,14 @@ jobs:
 
           cd webapp
           npx playwright install --with-deps chromium
-          CODIGO_BOOTSTRAP="$CODIGO" npm run test:e2e
+          # **Su fichero y sólo su fichero.** Con `npm run test:e2e` (que es `playwright test` sin
+          # filtro) este paso recogía también los recorridos adversarios y **se los saltaba en
+          # silencio**: su `anfitrion()` va a por `CODIGO_BOOTSTRAP`, que es de un solo uso y el
+          # `beforeAll` de aquí ya se lo ha gastado. Salía `10 tests … 7 skipped` y el paso en verde.
+          # Los adversarios tienen su propio paso, con su `COOKIE_HOST`; aquí sobran. Un paso que
+          # reporta verde saltándose la mitad de lo que ejecuta es el patrón que esta trayectoria ya
+          # documenta tres veces.
+          CODIGO_BOOTSTRAP="$CODIGO" npx playwright test tests/e2e/acceso.spec.ts
           cd ..
           kill %1
 
