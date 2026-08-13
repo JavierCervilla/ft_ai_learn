@@ -216,6 +216,7 @@ export class QaRecorder {
       captureErrors.push(`attach: ${messageOf(err)}`);
     }
 
+    // anti-slop-allow: la ruta del bundle se imprime a propósito; es cómo se encuentra tras un fallo
     console.log(`qa-bundle: fallo sellado como ${snapshotId} → ${dir}/FAILURE.md`);
     return dir;
   }

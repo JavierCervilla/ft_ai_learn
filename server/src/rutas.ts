@@ -75,6 +75,52 @@ async function volcar(ctx: Context, respuesta: Response): Promise<void> {
   ctx.response.body = new Uint8Array(await respuesta.arrayBuffer());
 }
 
+/**
+ * Los errores de Better Auth, dichos en el idioma de la app.
+ *
+ * La regla del cliente es que **el mensaje que se enseña sale del cuerpo de la respuesta**, nunca de
+ * interpretar el código de estado: así una interfaz servicial no puede reconstruir el oráculo de
+ * pertenencia que el servidor cierra a propósito. La regla se estaba cumpliendo — y por eso el rol
+ * `qa` vio `Invalid email or password` en una pantalla en español (H-1). El cuerpo lo escribe la
+ * librería, así que el arreglo va **aquí**, en quien lo produce, y no en el cliente: traducir allí
+ * habría sido la primera excepción a la regla, y las reglas con una excepción tienen dos.
+ *
+ * Se traduce **por `code`**, que es el contrato estable de la librería, y no por el texto. Y no se
+ * añade información al hacerlo: Better Auth ya usa `INVALID_EMAIL_OR_PASSWORD` tanto para un correo
+ * que no existe como para una contraseña equivocada, así que la traducción hereda esa indistinción
+ * en vez de romperla. Lo que no se reconoce cae a un mensaje genérico, que es el lado seguro.
+ */
+const EN_ESPANOL: Record<string, string> = {
+  INVALID_EMAIL_OR_PASSWORD: "correo o contraseña incorrectos",
+  INVALID_EMAIL: "correo o contraseña incorrectos",
+  INVALID_PASSWORD: "correo o contraseña incorrectos",
+  USER_NOT_FOUND: "correo o contraseña incorrectos",
+  SESSION_EXPIRED: "tu sesión ha caducado: vuelve a entrar",
+  TOO_MANY_REQUESTS: "demasiados intentos: espera un momento",
+};
+
+const GENERICO = "no se pudo completar la operación";
+
+async function enEspanol(respuesta: Response): Promise<Response> {
+  if (respuesta.ok) return respuesta;
+  if (!respuesta.headers.get("content-type")?.includes("json")) return respuesta;
+
+  const original = await respuesta.clone().text();
+  // Un `content-type` que promete JSON no garantiza JSON: si no parsea, se devuelve lo que vino.
+  let cuerpo: { code?: unknown; message?: unknown } | null;
+  try {
+    cuerpo = JSON.parse(original);
+  } catch {
+    return respuesta;
+  }
+  const code = typeof cuerpo?.code === "string" ? cuerpo.code : "";
+  const traducido = JSON.stringify({ ...cuerpo, message: EN_ESPANOL[code] ?? GENERICO });
+
+  const cabeceras = new Headers(respuesta.headers);
+  cabeceras.delete("content-length"); // el cuerpo cambia de tamaño al traducirlo
+  return new Response(traducido, { status: respuesta.status, headers: cabeceras });
+}
+
 export interface DepsRutas {
   sql: Sql;
   auth: Auth;
@@ -107,7 +153,7 @@ export function montarRutas(router: Router, { sql, auth, baseUrl, leerGrafo }: D
       headers: ctx.request.headers,
       body: cuerpo,
     });
-    await volcar(ctx, await auth.handler(peticion));
+    await volcar(ctx, await enEspanol(await auth.handler(peticion)));
   });
 
   /** El alta con invitación. Ver `registro.ts` para el orden de los pasos y por qué es ese. */
@@ -194,6 +240,17 @@ export function montarRutas(router: Router, { sql, auth, baseUrl, leerGrafo }: D
       | Record<string, unknown>
       | null;
     const email = typeof cuerpo?.email === "string" && cuerpo.email !== "" ? cuerpo.email : null;
+    // Y que **parezca** un correo, porque `consumir()` compara `lower(email)` contra el correo del
+    // alta: una invitación nominal emitida a algo que no lo es no la puede usar nadie jamás, y sin
+    // embargo se cobra el cupo y se enseña en la lista como una invitación viva. Cupo quemado en una
+    // invitación muerta, presentada como buena (F8/A2 de `qa-adversario`). La expresión es laxa a
+    // propósito: perseguir el RFC 5322 rechaza direcciones válidas, y aquí sólo hace falta descartar
+    // lo que con seguridad no puede casar nunca.
+    if (email !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      ctx.response.status = 400;
+      ctx.response.body = { error: "eso no parece un correo" };
+      return;
+    }
     const invitacion = await emitir(sql, userId, email);
     if (!invitacion) {
       ctx.response.status = 409;

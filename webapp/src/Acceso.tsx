@@ -28,9 +28,21 @@ export function Acceso({ alEntrar }: { alEntrar: (s: Sesion) => void }) {
     setError(null);
     setEnviando(true);
     try {
+      // `trim()` en correo y código, y **no** en la contraseña: un espacio ahí puede ser parte de la
+      // clave y recortarlo cambiaría el secreto de la persona. El código sí se recorta porque copiarlo
+      // desde un chat —o desde el propio `<code>` de la pantalla, que además avisa de que no se vuelve
+      // a mostrar— arrastra un espacio final, y el servidor rechaza con el mismo 403 indistinguible
+      // que un código inventado. Es decir: la invitación buena en la mano y ni una pista de por qué no
+      // entra. El no-oráculo del servidor está bien; lo que fallaba era mandarle algo que la persona
+      // no quiso escribir (F7/A2 de `qa-adversario`).
       const sesion = modo === "entrar"
-        ? await entrar({ email, password })
-        : await registrarse({ email, name, password, inviteCode });
+        ? await entrar({ email: email.trim(), password })
+        : await registrarse({
+          email: email.trim(),
+          name: name.trim(),
+          password,
+          inviteCode: inviteCode.trim(),
+        });
       alEntrar(sesion);
     } catch (fallo) {
       setError(fallo instanceof ErrorApi ? fallo.message : "No se pudo completar la operación.");

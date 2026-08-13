@@ -25,6 +25,18 @@ export interface Invitacion {
   usedAt: Date | null;
   revokedAt: Date | null;
   usedByUserId: string | null;
+  /**
+   * De quién es esta invitación, **según el servidor**.
+   *
+   * No es información nueva —siempre eres tú, porque la identidad sale de tu cookie y sólo se listan
+   * las tuyas— pero decirlo en voz alta permite al cliente comprobar que la respuesta corresponde a
+   * quien él cree ser. La cookie es del navegador entero: si en otra pestaña sale una persona y entra
+   * otra, la pantalla vieja seguía firmando como el anterior mientras la API atendía al nuevo, y el
+   * código que aparecía bajo un nombre salía del cupo del otro (F4/A3 de `qa-adversario`). Preguntar
+   * «¿quién soy?» por separado no lo arregla: entre la pregunta y la escritura hay una carrera que se
+   * pierde. Que la propia respuesta diga de quién es la cierra sin carrera.
+   */
+  inviterId: string;
 }
 
 /** Código opaco y aleatorio. Nunca correlativo: un id adivinable es una invitación regalada (§12.4). */
@@ -74,7 +86,8 @@ export async function emitir(
       insert into invitation (code, inviter_id, email)
       values (${generarCodigo()}, ${userId}, ${email ?? null})
       returning code, email, created_at as "createdAt", used_at as "usedAt",
-                revoked_at as "revokedAt", used_by_user_id as "usedByUserId"`;
+                revoked_at as "revokedAt", used_by_user_id as "usedByUserId",
+                inviter_id as "inviterId"`;
     return filas[0] ?? null;
   }) as Invitacion | null;
 }
@@ -113,7 +126,8 @@ export async function revocar(sql: Sql, userId: string, code: string): Promise<b
 export async function listar(sql: Sql, userId: string): Promise<Invitacion[]> {
   return await sql<Invitacion[]>`
     select code, email, created_at as "createdAt", used_at as "usedAt",
-           revoked_at as "revokedAt", used_by_user_id as "usedByUserId"
+           revoked_at as "revokedAt", used_by_user_id as "usedByUserId",
+           inviter_id as "inviterId"
     from invitation where inviter_id = ${userId} order by created_at desc`;
 }
 

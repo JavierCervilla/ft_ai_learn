@@ -6,6 +6,12 @@
     <title>ft_ai_learn — Holy Graph de IA</title>
     <meta name="description" content="Un mapa de competencias de IA recorrible en sentadas de quince minutos." />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <!--
+      El valor no queda suelto: `tests/marca.test.ts` comprueba que es exactamente --color-fondo
+      convertido a sRGB, así que el token sigue siendo el único sitio donde se decide el color.
+      El escape del gate tiene que ir en la línea inmediatamente anterior, de ahí que vaya suelto.
+    -->
+    <!-- anti-slop-allow: el formato exige hex y no lee variables CSS -->
     <meta name="theme-color" content="#0b1020" />
     <link rel="icon" type="image/png" href="/icons/icon-192.png" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />

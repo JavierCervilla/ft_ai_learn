@@ -20,3 +20,21 @@ Exit 0 limpio · 1 con violaciones duras · 2 error de uso. El escape por línea
 `anti-slop-allow: <razón>`, y queda trazado en el diff.
 
 Para actualizarlo, se recopia del framework a propósito: `.claude/skills/frontend-anti-slop/`.
+
+## `*.html` (añadido en D.2 tras el pase adversario)
+
+El filtro de extensiones original —`.tsx .ts .jsx .js .css`— era **estructuralmente ciego a los dos
+ficheros donde vive la identidad visual de una PWA**: `index.html` y el manifiesto. `qa-adversario`
+lo reprodujo (F9/A12): con `#0b1020` a la vista en los tres sitios, el gate decía `criticos=0 ·
+LIMPIO`, y **ni apuntándolo a `webapp/` entero** saltaba. Un gate que no mira un fichero no es
+permisivo con él: es que no existe para él.
+
+Se añade `*.html`. **El mismo cambio está hecho en la skill original del framework**, para que esto
+siga siendo una copia y no una bifurcación — hasta que ese cambio esté en `main` de AgenticFramework,
+esta copia va un commit por delante, y queda dicho aquí para que nadie lo descubra por un diff.
+
+El `.webmanifest` **no** entra, y no por olvido: es JSON, no admite comentarios, y el escape del gate
+(`anti-slop-allow: <razón>`) es una línea de comentario. Un fichero que no puede declarar una
+excepción sólo puede pasar o bloquear para siempre, y su hex es **obligatorio** por el formato. Ese
+caso lo cubre `webapp/tests/marca.test.ts`, que es más fuerte que el gate: no comprueba que no haya
+un literal, comprueba que el literal **sea exactamente el token** convertido a sRGB.

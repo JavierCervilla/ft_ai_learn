@@ -34,7 +34,7 @@ USO:
   audit-anti-slop.sh [--help] [<dir>]
 
   <dir>     Directorio a escanear (por defecto: directorio actual).
-            Se escanean recursivamente ficheros *.tsx *.ts *.jsx *.js *.css.
+            Se escanean recursivamente ficheros *.tsx *.ts *.jsx *.js *.css *.html.
 
 DESCRIPCION:
   Veta "slop" de frontend de forma objetiva, leyendo patrones grep de:
@@ -92,7 +92,8 @@ done
 #
 # `dist`/`build`/`.next`/`coverage` son salidas del compilador: código generado, no escrito, y
 # juzgarlo por criterios de artesanía no significa nada.
-PRUNE_DIRS=(node_modules .git dist build .next out coverage vendor .venv __pycache__ .turbo .cache)
+PRUNE_DIRS=(node_modules .git dist build .next out coverage vendor .venv __pycache__ .turbo .cache \
+            test-results playwright-report qa-bundles)
 _prune=()
 for _d in "${PRUNE_DIRS[@]}"; do
   [ ${#_prune[@]} -eq 0 ] || _prune+=(-o)
@@ -102,7 +103,8 @@ done
 FILES=()
 while IFS= read -r _l; do FILES+=("$_l"); done < <(find "$TARGET_DIR" \
   \( -type d \( "${_prune[@]}" \) -prune \) -o \
-  \( -type f \( -name '*.tsx' -o -name '*.ts' -o -name '*.jsx' -o -name '*.js' -o -name '*.css' \) \
+  \( -type f \( -name '*.tsx' -o -name '*.ts' -o -name '*.jsx' -o -name '*.js' -o -name '*.css' \
+     -o -name '*.html' \) \
   -print \) \
   2>/dev/null | sort)
 

@@ -19,6 +19,8 @@ export interface Invitacion {
   usedAt: string | null;
   revokedAt: string | null;
   usedByUserId: string | null;
+  /** De quién es, según el servidor. Ver el comentario de `emitir` en `Cuenta.tsx`. */
+  inviterId: string;
 }
 
 export interface EstadoInvitaciones {
@@ -60,12 +62,24 @@ async function pedir<T>(ruta: string, init: RequestInit = {}): Promise<T> {
   return cuerpo as T;
 }
 
-/** Quién eres, o `null`. Es lo primero que pregunta la app al cargar. */
+/** Un fallo de red, distinguible de cualquier respuesta del servidor. */
+export const SIN_RED = 0;
+
+/**
+ * Quién eres, o `null`. Es lo primero que pregunta la app al cargar.
+ *
+ * **Un fallo de red NO es «no tienes sesión»** y por eso se relanza. Tragarlo devolviendo `null` —que
+ * es lo que hacía— le enseñaba el formulario de acceso a quien tenía la sesión perfectamente viva:
+ * sin cobertura la app le decía que la había echado, y encima le ofrecía un botón «Entrar» que
+ * offline tampoco podía funcionar. Reproducido por `qa-adversario` (F3/A9) en el escenario declarado
+ * del producto, que es el metro.
+ */
 export async function sesionActual(): Promise<Sesion | null> {
   try {
     const s = await pedir<Sesion | null>("/api/auth/get-session");
     return s?.user ? s : null;
-  } catch {
+  } catch (fallo) {
+    if (fallo instanceof ErrorApi && fallo.estado === SIN_RED) throw fallo;
     // Sin sesión la librería responde con un cuerpo vacío; eso no es un error que enseñar.
     return null;
   }
@@ -101,6 +115,20 @@ export function emitirInvitacion(email?: string): Promise<Invitacion> {
     method: "POST",
     body: JSON.stringify(email ? { email } : {}),
   });
+}
+
+/**
+ * ¿Tiene forma de correo?
+ *
+ * Deliberadamente laxa —una expresión que persiga el RFC 5322 rechaza direcciones válidas— y sólo
+ * sirve para lo que la motivó: `consumir()` compara `lower(email)` contra el correo del alta, así que
+ * una invitación nominal emitida a algo que no es un correo **no la puede usar nadie jamás**, y sin
+ * embargo se cobra el cupo y se enseña en la lista como una invitación viva (F8/A2). El
+ * `<input type="email">` no la cazaba porque no vive dentro de un `<form>`: su validación nativa no
+ * llega a correr nunca. La misma comprobación está en el servidor, que es donde manda.
+ */
+export function pareceCorreo(v: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 }
 
 export function revocarInvitacion(code: string): Promise<{ cupo: number }> {
