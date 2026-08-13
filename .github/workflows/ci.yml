@@ -313,6 +313,49 @@ jobs:
       - name: Trinquete adversario · el gate de interfaz no es ciego al HTML
         run: deno test -A tests/e2e/journeys/adversarial/a12-gate-anti-slop-ciego-al-html.spec.ts
 
+      # A5 · el oráculo de pertenencia POR TIEMPO (FTAI-D.3). Va en su propio paso y con su propio
+      # servidor porque necesita algo que ningún otro necesita: **aflojar el límite por IP**. El
+      # recorrido emite ~54 altas desde una sola dirección y el valor por defecto (10/min) lo
+      # bloquearía. Se afloja aquí, a la vista, y no en el código: un gate que sólo puede correr
+      # desactivando en silencio la defensa que valida es un gate que alguien borra al mes.
+      #
+      # El umbral (50 ms de separación entre las TRES poblaciones, medianas, 15 sondas en rotación)
+      # lo fijó el rol `seguridad`, no el pase adversario. Contraprobado antes de darlo por bueno:
+      # contra el servidor SIN el arreglo sale rojo con 348 ms de separación.
+      - name: Trinquete adversario · el reloj no delata quién está en el círculo (A5)
+        env:
+          REGISTRO_MAX_POR_IP: "500"
+        run: |
+          deno run -A server/src/main.ts &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8000/health && break || sleep 1; done
+
+          deno eval "
+            const p = (await import('npm:postgres@3.4.5')).default(Deno.env.get('DATABASE_URL'));
+            await p\`truncate user_progress, invitation, user_invite_quota, session, account, \"user\" cascade\`;
+            await p.end();
+          "
+          CODIGO=$(deno task invitar:bootstrap | tail -1)
+          COOKIE=$(curl -s -D- -o /dev/null -X POST http://localhost:8000/api/registro \
+            -H 'content-type: application/json' -H 'origin: http://localhost:8000' \
+            -d "{\"email\":\"a5@ejemplo.test\",\"password\":\"contrasena-larga-de-prueba\",\"name\":\"A\",\"inviteCode\":\"$CODIGO\"}" \
+            | grep -i '^set-cookie' | sed 's/^[Ss]et-[Cc]ookie: //' | cut -d';' -f1)
+          deno eval "
+            const p = (await import('npm:postgres@3.4.5')).default(Deno.env.get('DATABASE_URL'));
+            await p\`update user_invite_quota set remaining = 5000\`;
+            await p.end();
+          "
+
+          COOKIE_HOST="$COOKIE" \
+            deno test -A tests/e2e/journeys/adversarial/a5-oraculo-de-pertenencia-por-tiempo.spec.ts
+
+          # El canario del piso: si alguna respuesta lo hubiera superado, el canal se estaría
+          # reabriendo aunque las medianas cuadren. Se comprueba, no se supone.
+          DESBORDES=$(curl -s http://localhost:8000/health | deno eval "console.log((JSON.parse(await new Response(Deno.stdin.readable).text())).registroDesbordes)")
+          echo "desbordes del piso: $DESBORDES"
+          [ "$DESBORDES" = "0" ] || { echo "el piso temporal se desbordó $DESBORDES veces"; exit 1; }
+
+          kill %1
+
       - name: El bootstrap se cierra en cuanto hay alguien
         run: |
           # La puerta de servicio no se puede volver a abrir: si esto dejara de fallar, cualquiera con
