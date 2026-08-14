@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  cajaEtiqueta,
   disponer,
   type EstadoNodo,
   estadoDe,
+  etiquetaDe,
   type Grafo,
   type NodoDispuesto,
+  RADIO_NODO,
 } from "../../core/src/mod.ts";
 
 /**
@@ -27,11 +30,19 @@ import {
  * `prefers-reduced-motion`.
  */
 
-/** Radio dibujado de cada tipo de nodo, en unidades de `viewBox`. */
-const RADIO = { concept: 9, project: 13 } as const;
-
-/** Margen alrededor del grafo al encuadrar, para que ninguna etiqueta toque el borde. */
-const MARGEN = 110;
+/**
+ * Margen alrededor del grafo al encuadrar, **proporcional a lo que ocupa el grafo**.
+ *
+ * Era una constante de 110 unidades, y con el contenido real de Fase 0 —una sola de las siete ramas
+ * poblada, un racimo de 243×135 unidades— el margen fijo se comía casi la mitad del encuadre: las
+ * estrellas salían al 52 % del ancho, flotando en un vacío que parecía un fallo de carga. Lo vio el
+ * humano en su móvil; ningún test lo miraba, porque G4 comprobaba «no desborda» y no «se aprovecha».
+ *
+ * El mínimo existe para el caso contrario: con un grafo diminuto —o uno solo— un margen proporcional
+ * tendería a cero y la estrella tocaría el borde.
+ */
+const MARGEN_MINIMO = 40;
+const MARGEN_FRACCION = 0.12;
 
 /** Límites del zoom, en anchura de `viewBox`: menos es más cerca. */
 const ZOOM = { cerca: 220, lejos: 1800 } as const;
@@ -77,12 +88,28 @@ export function Mapa({
   const encuadrar = useCallback(() => {
     const svg = svgRef.current;
     if (!svg || nodos.length === 0) return;
-    const xs = nodos.map((n) => n.x);
-    const ys = nodos.map((n) => n.y);
-    const x0 = Math.min(...xs) - MARGEN;
-    const x1 = Math.max(...xs) + MARGEN;
-    const y0 = Math.min(...ys) - MARGEN;
-    const y1 = Math.max(...ys) + MARGEN;
+    // Los límites incluyen los rótulos, no sólo los centros: una etiqueta larga sobresale bastante más
+    // que su estrella, y encuadrar por los centros la dejaba medio fuera por el lado corto.
+    const cajas = nodos.map((n) => {
+      const r = RADIO_NODO[n.nodo.type];
+      const etiqueta = cajaEtiqueta(n);
+      return {
+        x0: Math.min(n.x - r, etiqueta.x0),
+        x1: Math.max(n.x + r, etiqueta.x1),
+        y0: Math.min(n.y - r, etiqueta.y0),
+        y1: Math.max(n.y + r, etiqueta.y1),
+      };
+    });
+    const bx0 = Math.min(...cajas.map((c) => c.x0));
+    const bx1 = Math.max(...cajas.map((c) => c.x1));
+    const by0 = Math.min(...cajas.map((c) => c.y0));
+    const by1 = Math.max(...cajas.map((c) => c.y1));
+
+    const margen = Math.max(MARGEN_MINIMO, MARGEN_FRACCION * Math.max(bx1 - bx0, by1 - by0));
+    const x0 = bx0 - margen;
+    const x1 = bx1 + margen;
+    const y0 = by0 - margen;
+    const y1 = by1 + margen;
     const w = x1 - x0;
     const h = y1 - y0;
     const rel = svg.clientWidth / Math.max(1, svg.clientHeight);
@@ -256,7 +283,7 @@ function Estrella({
   alTocar: (id: string) => void;
 }) {
   const { nodo, x, y } = puesto;
-  const r = RADIO[nodo.type];
+  const r = RADIO_NODO[nodo.type];
   const apagada = estado === "locked";
 
   return (
@@ -276,6 +303,14 @@ function Estrella({
         alTocar(nodo.id);
       }}
     >
+      {/*
+        El foco se DIBUJA aquí en vez de dejárselo al `outline` del navegador. Dos motivos, y el
+        segundo es el que lo hizo urgente: un `outline` sobre este `<g>` encuadra su caja entera
+        —estrella *y* rótulo—, que en el móvil salía como un recuadro blanco enorme; y el anillo del
+        navegador aparece al **tocar** con el dedo, porque Chrome en Android no aplica `:focus-visible`
+        a un `<g role="button">`. Con el indicador propio, el toque no pinta nada y el teclado sí.
+      */}
+      <circle className="foco" cx={x} cy={y} r={r + 9} />
       {!apagada && <circle className="halo" cx={x} cy={y} r={r * 2.5} />}
       <circle
         className="cuerpo"
@@ -286,8 +321,18 @@ function Estrella({
       />
       {/* El anillo distingue un proyecto de un concepto sin depender del color, que ya lleva el estado. */}
       {nodo.type === "project" && <circle className="anillo" cx={x} cy={y} r={r + 7} />}
-      <text className="etiqueta" x={x} y={y + r + 15} textAnchor="middle">
-        {nodo.title.length > 26 ? `${nodo.title.slice(0, 24)}…` : nodo.title}
+      {/*
+        El lado lo decide `disponer()`, no el render: con una sola rama poblada dos rótulos vecinos se
+        pisaban, y de qué lado cabe una etiqueta es una función de dónde están las demás — o sea, del
+        grafo. Aquí sólo se lee el resultado. Ver `core/src/disposicion.ts`.
+      */}
+      <text
+        className="etiqueta"
+        x={x}
+        y={puesto.ladoEtiqueta === "abajo" ? y + r + 15 : y - r - 15}
+        textAnchor="middle"
+      >
+        {etiquetaDe(nodo)}
       </text>
     </g>
   );
