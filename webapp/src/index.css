@@ -202,9 +202,29 @@ body::before {
   }
 }
 
-.mapa-nodo:focus-visible {
-  outline: 2px solid var(--color-acento);
-  outline-offset: 3px;
+/*
+  El anillo del navegador se apaga y se sustituye por uno propio (`.foco`, dibujado en el SVG).
+
+  No es cosmética: el `outline` de la UA encuadra la caja entera del `<g role="button">` —estrella y
+  rótulo—, y en un móvil eso es un recuadro blanco del tamaño de media constelación. Peor aún, aparecía
+  al TOCAR: Chrome en Android no considera `:focus-visible` un `<g>` enfocado con el dedo, así que
+  ganaba el `:focus` por defecto. Apagar el outline sin poner nada en su sitio habría cambiado un fallo
+  visible por uno invisible —dejar sin foco a quien navega con teclado—, así que el sustituto va primero
+  y hay un recorrido que lo comprueba en los dos sentidos.
+*/
+.mapa-nodo:focus {
+  outline: none;
+}
+
+.mapa-nodo .foco {
+  fill: none;
+  stroke: var(--color-acento);
+  stroke-width: 1.5;
+  opacity: 0;
+}
+
+.mapa-nodo:focus-visible .foco {
+  opacity: 1;
 }
 
 .mapa-aristas path {

@@ -33,13 +33,80 @@ const PASO_ANILLO = 118;
  */
 const OCUPACION_SECTOR = 0.66;
 
+/**
+ * Radio dibujado de cada tipo de nodo.
+ *
+ * Vive aquí y no en el render porque **decidir dónde cabe una etiqueta exige saber cuánto ocupa la
+ * estrella**. Tenerlo en los dos sitios sería el mismo error que se evitó derivando la posición: dos
+ * lugares donde vive un dato, divergiendo en silencio. `Mapa.tsx` lo importa.
+ */
+export const RADIO_NODO: Readonly<Record<Nodo["type"], number>> = { concept: 9, project: 13 };
+
+/** Cuerpo de la etiqueta, y hueco entre el borde de la estrella y su línea base. */
+const ALTURA_ETIQUETA = 11;
+const SEPARACION_ETIQUETA = 15;
+
+/**
+ * Anchura estimada de un carácter a `ALTURA_ETIQUETA`.
+ *
+ * Es una **sobreestimación a propósito** (~0,56 em cuando la media real ronda 0,5): el número sólo se
+ * usa para decidir de qué lado va un rótulo, y pasarse hace que la regla se incline a separar donde
+ * quizá no hacía falta — que es el error barato. El error caro es el contrario, y es lo que se veía en
+ * el móvil. Las métricas de verdad viven en el navegador; lo que se prueba aquí es **la regla**.
+ */
+const ANCHO_CARACTER = 6.2;
+
+/** A partir de aquí el título se corta: un rótulo más largo tapa a sus vecinos pase lo que pase. */
+const MAXIMO_VISIBLE = 26;
+const CORTE = 24;
+
 export interface NodoDispuesto {
   nodo: Nodo;
   x: number;
   y: number;
   /** Cuántos prerequisitos encadenados hay que hacer antes que éste. Es el anillo. */
   profundidad: number;
+  /**
+   * De qué lado de la estrella va el rótulo.
+   *
+   * También se **deriva**, por el mismo motivo que la posición. Con una sola de las siete ramas poblada
+   * el racimo queda apretado y dos rótulos vecinos se pisaban —lo vio el humano en su móvil antes que
+   * ningún test—, así que el lado deja de ser una constante del render y pasa a ser una función del
+   * grafo: calculable, determinista y comprobable sin navegador.
+   */
+  ladoEtiqueta: "arriba" | "abajo";
 }
+
+/** El texto que se dibuja de verdad, recortado. Lo comparten el render y el cálculo de solapes. */
+export function etiquetaDe(nodo: Nodo): string {
+  return nodo.title.length > MAXIMO_VISIBLE ? `${nodo.title.slice(0, CORTE)}…` : nodo.title;
+}
+
+/** Rectángulo que ocupa el rótulo de un nodo ya colocado, en unidades de `viewBox`. */
+export function cajaEtiqueta(puesto: NodoDispuesto): {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+} {
+  const ancho = etiquetaDe(puesto.nodo).length * ANCHO_CARACTER;
+  const r = RADIO_NODO[puesto.nodo.type];
+  // `<text>` se ancla en la línea base: el cuerpo sube ~0,8 del tamaño y baja ~0,2 (las descendentes).
+  const base = puesto.ladoEtiqueta === "abajo"
+    ? puesto.y + r + SEPARACION_ETIQUETA
+    : puesto.y - r - SEPARACION_ETIQUETA;
+  return {
+    x0: puesto.x - ancho / 2,
+    x1: puesto.x + ancho / 2,
+    y0: base - ALTURA_ETIQUETA * 0.8,
+    y1: base + ALTURA_ETIQUETA * 0.2,
+  };
+}
+
+const seSolapan = (
+  a: ReturnType<typeof cajaEtiqueta>,
+  b: ReturnType<typeof cajaEtiqueta>,
+): boolean => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
 
 export interface RamaDispuesta {
   id: string;
@@ -130,10 +197,45 @@ export function disponer(grafo: Grafo): Disposicion {
           x: Math.cos(rad) * radio,
           y: Math.sin(rad) * radio,
           profundidad,
+          // Provisional: el lado se decide abajo, cuando ya están todos y se sabe quién choca con quién.
+          ladoEtiqueta: "abajo",
         });
       });
     }
   });
 
+  repartirEtiquetas(nodos);
   return { ramas, nodos };
+}
+
+/**
+ * Decide de qué lado va cada rótulo, en una segunda pasada.
+ *
+ * Hace falta una segunda pasada porque **el choque es entre pares**: no se puede saber si un rótulo
+ * estorba hasta que están colocados los dos, y los vecinos de una rama pueden serlo de otra.
+ *
+ * La regla es la mínima que resuelve lo observado: por defecto abajo —que es donde la etiqueta no tapa
+ * las aristas entrantes— y arriba sólo si abajo choca con alguno de los ya decididos. Es
+ * **determinista** en cualquier caso, que es lo que importa: el orden de recorrido ya lo es (rama por
+ * `id` → anillo → posición en el anillo).
+ *
+ * **Techo conocido, medido, y dicho en voz alta**: dos lados no bastan siempre. En un sector de ~34°
+ * —el que sale con siete ramas— la regla resuelve el anillo entero hasta **siete** nodos; a partir de
+ * ocho quedan solapes que ningún reparto de dos lados puede deshacer, y si arriba también choca el
+ * rótulo se queda arriba. Hoy la rama más poblada tiene tres nodos por anillo, así que el margen es
+ * amplio; **cuando una rama pase de siete en un anillo esto se verá**, y el arreglo entonces no es
+ * retocar esta función sino dar más sitio (radios por rama, o rótulos que se apartan en tangente). Se
+ * deja escrito para que ese día sea una decisión y no un descubrimiento.
+ */
+function repartirEtiquetas(nodos: NodoDispuesto[]): void {
+  const colocadas: ReturnType<typeof cajaEtiqueta>[] = [];
+  for (const puesto of nodos) {
+    const abajo = cajaEtiqueta(puesto);
+    if (colocadas.some((otra) => seSolapan(abajo, otra))) {
+      puesto.ladoEtiqueta = "arriba";
+      colocadas.push(cajaEtiqueta(puesto));
+    } else {
+      colocadas.push(abajo);
+    }
+  }
 }

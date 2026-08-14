@@ -9,7 +9,7 @@
  * Por eso aquí no se importa `jsr:@std/assert` ni `vitest`: sólo TypeScript y un par de aserciones
  * propias. Cada caso lanza si falla.
  */
-import type { Grafo, Nodo } from "../src/tipos.ts";
+import type { Eje, Grafo, Nodo } from "../src/tipos.ts";
 import {
   ciclos,
   desbloqueaA,
@@ -18,7 +18,7 @@ import {
   type Problema,
   validar,
 } from "../src/grafo.ts";
-import { disponer } from "../src/disposicion.ts";
+import { cajaEtiqueta, disponer } from "../src/disposicion.ts";
 import { radar, scoreEje } from "../src/radar.ts";
 
 // --- Aserciones mínimas -------------------------------------------------------------------------
@@ -77,6 +77,28 @@ function nodo(parcial: Partial<Nodo> & Pick<Nodo, "id">): Nodo {
     resources: [],
     ...parcial,
   };
+}
+
+/**
+ * La geometría que de verdad aprieta: **muchas ramas, una sola con contenido, y su anillo lleno**.
+ *
+ * Las siete ramas son las del contenido real, y son las que hacen que el sector mida unos 34° en vez de
+ * los 237° que da una rama sola. El número de nodos en el mismo anillo es lo que fuerza el choque: con
+ * cuatro los rótulos quedan escalonados y **no se tocan**, así que un caso construido con cuatro pasaría
+ * sin probar nada — que es exactamente cómo el solape llegó al móvil del humano. Siete es donde la regla
+ * tiene que trabajar y todavía llega; con ocho ya no, y ese techo está medido y documentado en
+ * `repartirEtiquetas`.
+ */
+function racimoApretado(cuantos: number): Grafo {
+  const g = grafoValido();
+  const otras: Eje[] = ["dl", "llms", "mlops", "matematicas", "ingenieria_sw", "ml"];
+  for (const eje of otras) {
+    g.branches.push({ id: eje, name: eje, isSpecialization: false, axis: eje, target: 10 });
+  }
+  for (let i = 2; i <= cuantos; i++) {
+    g.nodes.push(nodo({ id: `a${i}`, title: `Un título largo de los que se recortan ${i}` }));
+  }
+  return g;
 }
 
 /** Un grafo pequeño y VÁLIDO. Cada caso lo rompe de una forma concreta. */
@@ -399,6 +421,46 @@ export const casos: Caso[] = [
           );
         }
       }
+    },
+  },
+  {
+    nombre: "dos rótulos tampoco se pisan, aunque sus estrellas quepan",
+    ejecutar() {
+      // El caso de arriba mide **estrellas**; éste mide **rótulos**, y no es el mismo: un título de 24
+      // caracteres ocupa unas 150 unidades de ancho contra las 26 de la estrella más gorda, así que dos
+      // nodos que guardan la distancia mínima pueden tener las etiquetas superpuestas. Pasó en el móvil
+      // del humano con el contenido real —«El repositorio que será…» encima de «Python, repaso
+      // ejecutable»— y ningún test lo veía, porque nadie estaba mirando los rótulos.
+      const nodos = disponer(racimoApretado(7)).nodos;
+      for (let i = 0; i < nodos.length; i++) {
+        for (let j = i + 1; j < nodos.length; j++) {
+          const a = cajaEtiqueta(nodos[i]!), b = cajaEtiqueta(nodos[j]!);
+          afirmar(
+            !(a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1),
+            `los rótulos de ${nodos[i]!.nodo.id} y ${nodos[j]!.nodo.id} se solapan`,
+          );
+        }
+      }
+    },
+  },
+  {
+    nombre: "el lado del rótulo se deriva, y es el mismo en dos llamadas",
+    ejecutar() {
+      // Si el lado no fuera determinista, el mapa se reorganizaría entre dos cargas — el mismo motivo
+      // por el que la posición se deriva en vez de sortearse con un layout de fuerzas.
+      const g = racimoApretado(7);
+      const lados = (x: Grafo) =>
+        disponer(x).nodos.map((n) => `${n.nodo.id}:${n.ladoEtiqueta}`).join(",");
+      igual(lados(g), lados(g), "el lado del rótulo cambió entre dos llamadas");
+
+      const revuelto = { ...g, nodes: [...g.nodes].reverse() };
+      igual(lados(revuelto), lados(g), "el orden del fichero movió los rótulos");
+
+      // Y con el racimo apretado alguno TIENE que subir: si nunca subiera, la regla sería decorativa.
+      afirmar(
+        disponer(g).nodos.some((n) => n.ladoEtiqueta === "arriba"),
+        "nadie subió su rótulo pese a estar apretados: la regla no está haciendo nada",
+      );
     },
   },
   {
