@@ -44,8 +44,24 @@ import {
 const MARGEN_MINIMO = 40;
 const MARGEN_FRACCION = 0.12;
 
-/** Límites del zoom, en anchura de `viewBox`: menos es más cerca. */
-const ZOOM = { cerca: 220, lejos: 1800 } as const;
+/**
+ * Lo más cerca que se puede llegar, en anchura de `viewBox`. Menos es más cerca.
+ *
+ * Lo **lejos** no es una constante: se deriva del encuadre inicial (`LEJOS_VECES`), porque un tope
+ * fijo de 1800 unidades con un grafo de 440 dejaba alejar cuatro veces hasta convertirlo en una mota
+ * en mitad de la nada — parte del «se pierde el grafo» que reportó el humano. Atado al grafo, alejar
+ * del todo sigue enseñando el grafo, y el día que el contenido crezca el tope crece con él.
+ */
+const ZOOM_CERCA = 180;
+const LEJOS_VECES = 2.5;
+
+/**
+ * Cuánto se puede arrastrar más allá del contenido, en fracciones de la vista.
+ *
+ * Es lo que impide perder el grafo: sin tope, arrastrar es infinito y se acaba mirando cielo negro sin
+ * ninguna forma de volver. Con 0,35 siempre queda casi dos tercios de pantalla con algo dentro.
+ */
+const HOLGURA_ARRASTRE = 0.35;
 
 interface Vista {
   x: number;
@@ -80,16 +96,16 @@ export function Mapa({
   const porId = useMemo(() => new Map(nodos.map((n) => [n.nodo.id, n])), [nodos]);
 
   /**
-   * Encuadra el grafo entero.
+   * La caja que ocupa el grafo dibujado.
    *
-   * Se ajusta por el lado que **falte**, no por el que sobre: encuadrar por el lado corto recortaría
-   * estrellas, y un mapa que esconde parte del mapa la primera vez que lo abres no es un mapa.
+   * Se calcula una vez y la comparten los tres que la necesitan: el encuadre, el tope del arrastre y
+   * el límite de alejar. Tenerla en un sitio es lo que hace que las tres cosas hablen del mismo grafo.
+   *
+   * Incluye los rótulos y no sólo los centros: una etiqueta larga sobresale bastante más que su
+   * estrella, y encuadrar por los centros la dejaba medio fuera por el lado corto.
    */
-  const encuadrar = useCallback(() => {
-    const svg = svgRef.current;
-    if (!svg || nodos.length === 0) return;
-    // Los límites incluyen los rótulos, no sólo los centros: una etiqueta larga sobresale bastante más
-    // que su estrella, y encuadrar por los centros la dejaba medio fuera por el lado corto.
+  const limites = useMemo(() => {
+    if (nodos.length === 0) return null;
     const cajas = nodos.map((n) => {
       const r = RADIO_NODO[n.nodo.type];
       const etiqueta = cajaEtiqueta(n);
@@ -100,23 +116,80 @@ export function Mapa({
         y1: Math.max(n.y + r, etiqueta.y1),
       };
     });
-    const bx0 = Math.min(...cajas.map((c) => c.x0));
-    const bx1 = Math.max(...cajas.map((c) => c.x1));
-    const by0 = Math.min(...cajas.map((c) => c.y0));
-    const by1 = Math.max(...cajas.map((c) => c.y1));
+    return {
+      x0: Math.min(...cajas.map((c) => c.x0)),
+      x1: Math.max(...cajas.map((c) => c.x1)),
+      y0: Math.min(...cajas.map((c) => c.y0)),
+      y1: Math.max(...cajas.map((c) => c.y1)),
+    };
+  }, [nodos]);
 
-    const margen = Math.max(MARGEN_MINIMO, MARGEN_FRACCION * Math.max(bx1 - bx0, by1 - by0));
-    const x0 = bx0 - margen;
-    const x1 = bx1 + margen;
-    const y0 = by0 - margen;
-    const y1 = by1 + margen;
-    const w = x1 - x0;
-    const h = y1 - y0;
+  /** Anchura del encuadre inicial: de ahí sale lo lejos que se deja alejar. */
+  const anchoInicial = useRef(0);
+
+  /**
+   * Encuadra el grafo entero.
+   *
+   * Se ajusta por el lado que **falte**, no por el que sobre: encuadrar por el lado corto recortaría
+   * estrellas, y un mapa que esconde parte del mapa la primera vez que lo abres no es un mapa.
+   */
+  const encuadrar = useCallback(() => {
+    const svg = svgRef.current;
+    if (!svg || !limites) return;
+    const margen = Math.max(
+      MARGEN_MINIMO,
+      MARGEN_FRACCION * Math.max(limites.x1 - limites.x0, limites.y1 - limites.y0),
+    );
+    const x0 = limites.x0 - margen;
+    const y0 = limites.y0 - margen;
+    const w = limites.x1 - limites.x0 + margen * 2;
+    const h = limites.y1 - limites.y0 + margen * 2;
     const rel = svg.clientWidth / Math.max(1, svg.clientHeight);
     const W = w / h > rel ? w : h * rel;
     const H = w / h > rel ? w / rel : h;
+    anchoInicial.current = W;
     setVista({ x: x0 + w / 2 - W / 2, y: y0 + h / 2 - H / 2, w: W, h: H });
-  }, [nodos]);
+  }, [limites]);
+
+  /**
+   * Acota una vista para que el grafo **no se pueda perder**.
+   *
+   * El centro del encuadre se queda dentro de la caja del contenido con una holgura; sin esto,
+   * arrastrar es infinito y quien se pasa acaba mirando cielo negro sin forma de volver. No sustituye
+   * al botón de centrar —eso es la vuelta a casa tras acercarse mucho— sino que evita hacer falta.
+   */
+  const acotar = useCallback((v: Vista): Vista => {
+    if (!limites) return v;
+    const cx = Math.min(
+      Math.max(v.x + v.w / 2, limites.x0 - v.w * HOLGURA_ARRASTRE),
+      limites.x1 + v.w * HOLGURA_ARRASTRE,
+    );
+    const cy = Math.min(
+      Math.max(v.y + v.h / 2, limites.y0 - v.h * HOLGURA_ARRASTRE),
+      limites.y1 + v.h * HOLGURA_ARRASTRE,
+    );
+    return { ...v, x: cx - v.w / 2, y: cy - v.h / 2 };
+  }, [limites]);
+
+  /**
+   * Escala la vista **anclando un punto de la pantalla**, que es lo que hace que el zoom se sienta
+   * bien: lo que había bajo tus dedos (o bajo el cursor) sigue estando ahí después.
+   *
+   * Lo comparten el pellizco y la rueda. Antes sólo existía para la rueda y anclaba en el centro de la
+   * pantalla, que es lo que hace que acercarse «se vaya» hacia donde no mirabas.
+   */
+  const conZoom = useCallback((v: Vista, factor: number, ancla: { x: number; y: number }): Vista => {
+    const svg = svgRef.current;
+    if (!svg) return v;
+    const caja = svg.getBoundingClientRect();
+    const lejos = (anchoInicial.current || v.w) * LEJOS_VECES;
+    const w = Math.min(lejos, Math.max(ZOOM_CERCA, v.w * factor));
+    const h = v.h * (w / v.w);
+    // Fracción de pantalla donde está el ancla; el punto del grafo que hay debajo no se mueve.
+    const fx = (ancla.x - caja.left) / Math.max(1, caja.width);
+    const fy = (ancla.y - caja.top) / Math.max(1, caja.height);
+    return { x: v.x + fx * (v.w - w), y: v.y + fy * (v.h - h), w, h };
+  }, []);
 
   useEffect(() => {
     encuadrar();
@@ -125,30 +198,63 @@ export function Mapa({
   }, [encuadrar]);
 
   // --- Desplazar y acercar ----------------------------------------------------------------------
-  const arrastre = useRef<{ x: number; y: number } | null>(null);
+
+  /**
+   * Los dedos (o el ratón) que hay encima ahora mismo, con su última posición.
+   *
+   * Era **un solo puntero**, y por eso el mapa estaba roto en un móvil: al apoyar el segundo dedo, su
+   * `pointerdown` pisaba la posición del primero y el siguiente movimiento se calculaba entre dedos
+   * distintos — el mapa pegaba un salto. Intentar pellizcar no es que no hiciera zoom: es que perdía
+   * el grafo. Con un mapa por `pointerId` cada dedo tiene su historia y el gesto se decide por cuántos
+   * hay: uno desplaza, dos pellizcan.
+   */
+  const punteros = useRef(new Map<number, { x: number; y: number }>());
 
   const alBajar = (e: React.PointerEvent<SVGSVGElement>) => {
-    arrastre.current = { x: e.clientX, y: e.clientY };
+    punteros.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const alMover = (e: React.PointerEvent<SVGSVGElement>) => {
-    const desde = arrastre.current;
     const svg = svgRef.current;
-    if (!desde || !svg || !vista) return;
+    if (!svg || !vista || !punteros.current.has(e.pointerId)) return;
+
+    const antes = [...punteros.current.values()];
+    punteros.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const ahora = [...punteros.current.values()];
+
     // La conversión de píxeles a unidades del `viewBox` es lo que hace que arrastrar se sienta igual
     // de rápido esté donde esté el zoom.
     const k = vista.w / Math.max(1, svg.clientWidth);
-    setVista({
+
+    const [a0, a1] = antes;
+    const [b0, b1] = ahora;
+    if (!a0 || !b0) return;
+
+    if (!a1 || !b1) {
+      setVista(acotar({ ...vista, x: vista.x - (b0.x - a0.x) * k, y: vista.y - (b0.y - a0.y) * k }));
+      return;
+    }
+
+    // Dos dedos: la separación manda el zoom y el punto medio manda el desplazamiento. Se hacen las
+    // dos cosas porque un pellizco de verdad casi nunca es sólo una: los dedos también se mueven.
+    const separacionAntes = Math.hypot(a0.x - a1.x, a0.y - a1.y);
+    const separacionAhora = Math.hypot(b0.x - b1.x, b0.y - b1.y);
+    if (separacionAntes < 1 || separacionAhora < 1) return;
+
+    const medioAntes = { x: (a0.x + a1.x) / 2, y: (a0.y + a1.y) / 2 };
+    const medioAhora = { x: (b0.x + b1.x) / 2, y: (b0.y + b1.y) / 2 };
+    const desplazada: Vista = {
       ...vista,
-      x: vista.x - (e.clientX - desde.x) * k,
-      y: vista.y - (e.clientY - desde.y) * k,
-    });
-    arrastre.current = { x: e.clientX, y: e.clientY };
+      x: vista.x - (medioAhora.x - medioAntes.x) * k,
+      y: vista.y - (medioAhora.y - medioAntes.y) * k,
+    };
+    // Separar los dedos agranda la separación y encoge el `viewBox`: por eso el cociente va al revés.
+    setVista(acotar(conZoom(desplazada, separacionAntes / separacionAhora, medioAhora)));
   };
 
-  const alSoltar = () => {
-    arrastre.current = null;
+  const alSoltar = (e: React.PointerEvent<SVGSVGElement>) => {
+    punteros.current.delete(e.pointerId);
   };
 
   useEffect(() => {
@@ -159,30 +265,39 @@ export function Mapa({
     // también haría scroll de la página.
     const alRodar = (e: WheelEvent) => {
       e.preventDefault();
-      setVista((v) => {
-        if (!v) return v;
-        const f = e.deltaY > 0 ? 1.12 : 1 / 1.12;
-        const w = Math.min(ZOOM.lejos, Math.max(ZOOM.cerca, v.w * f));
-        const k = w / v.w;
-        const h = v.h * k;
-        return { x: v.x + (v.w - w) / 2, y: v.y + (v.h - h) / 2, w, h };
-      });
+      setVista((v) =>
+        v ? acotar(conZoom(v, e.deltaY > 0 ? 1.12 : 1 / 1.12, { x: e.clientX, y: e.clientY })) : v
+      );
     };
     svg.addEventListener("wheel", alRodar, { passive: false });
     return () => svg.removeEventListener("wheel", alRodar);
-  }, []);
+  }, [acotar, conZoom]);
 
   return (
-    <svg
-      ref={svgRef}
-      className="fixed inset-0 h-full w-full touch-none"
-      viewBox={vista ? `${vista.x} ${vista.y} ${vista.w} ${vista.h}` : "-300 -300 600 600"}
-      onPointerDown={alBajar}
-      onPointerMove={alMover}
-      onPointerUp={alSoltar}
-      onPointerCancel={alSoltar}
-      aria-label="Mapa de competencias"
-    >
+    <>
+      {/*
+        La vuelta a casa. Con el tope del arrastre puesto el grafo ya no se puede perder, pero después
+        de acercarse a una estrella hace falta poder volver a verlo entero sin pelearse con el gesto —
+        `game-ui-web` lo cuenta como *crítico* («dónde estoy»), no como decoración. Llama a
+        `encuadrar()`, que es la función que ya hacía exactamente esto y no estaba cableada a nada.
+      */}
+      <button
+        type="button"
+        onClick={encuadrar}
+        className="fixed right-4 bottom-6 z-10 min-h-11 min-w-11 rounded-full border border-[var(--color-borde)] bg-[var(--color-panel)]/80 px-4 text-sm text-[var(--color-tenue)]"
+      >
+        Centrar
+      </button>
+      <svg
+        ref={svgRef}
+        className="fixed inset-0 h-full w-full touch-none"
+        viewBox={vista ? `${vista.x} ${vista.y} ${vista.w} ${vista.h}` : "-300 -300 600 600"}
+        onPointerDown={alBajar}
+        onPointerMove={alMover}
+        onPointerUp={alSoltar}
+        onPointerCancel={alSoltar}
+        aria-label="Mapa de competencias"
+      >
       <defs>
         {/*
           El brillo de las estrellas. Es la **intención** del bloom de un post-proceso 3D, conseguida
@@ -269,7 +384,8 @@ export function Mapa({
           />
         ))}
       </g>
-    </svg>
+      </svg>
+    </>
   );
 }
 

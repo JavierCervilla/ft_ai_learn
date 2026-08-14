@@ -138,6 +138,115 @@ test("G5 · un nodo bloqueado se ve apagado y se distingue de uno disponible", a
   await expect(apagados).not.toHaveCount(0);
 });
 
+/**
+ * Un pellizco de verdad, con dos dedos.
+ *
+ * Va por **CDP** (`Input.dispatchTouchEvent`) y no despachando `PointerEvent` sintéticos: Playwright no
+ * tiene API multitáctil, y un evento fabricado a mano probaría nuestro manejador saltándose la mitad de
+ * la cadena — entre otras cosas, si `touch-action` se come el gesto antes de que llegue. Ese fue
+ * exactamente el fallo que reportó el humano: el `touch-none` del SVG apagaba el pellizco **nativo** y
+ * no había ninguno propio, así que en un móvil no existía el zoom.
+ *
+ * `factor > 1` separa los dedos (acercar), `< 1` los junta (alejar).
+ */
+async function pellizcar(page: import("@playwright/test").Page, factor: number) {
+  const cdp = await page.context().newCDPSession(page);
+  const cx = 195, cy = 420, base = 90;
+  const puntos = (d: number) => [
+    { x: cx - d, y: cy, id: 1 },
+    { x: cx + d, y: cy, id: 2 },
+  ];
+  const enviar = (tipo: "touchStart" | "touchMove" | "touchEnd", d: number) =>
+    cdp.send("Input.dispatchTouchEvent", {
+      type: tipo,
+      touchPoints: tipo === "touchEnd" ? [] : puntos(d).map((p) => ({ x: p.x, y: p.y, id: p.id })),
+    });
+
+  await enviar("touchStart", base);
+  // En varios pasos: un salto único desde la posición inicial no se parece a un dedo, y el gesto se
+  // calcula por incrementos entre movimientos consecutivos.
+  for (let i = 1; i <= 6; i++) {
+    await enviar("touchMove", base + (base * (factor - 1) * i) / 6);
+  }
+  await enviar("touchEnd", base * factor);
+  await cdp.detach();
+}
+
+/** La anchura del `viewBox`, que es la medida de cuánto zoom hay: menos anchura es más cerca. */
+async function anchuraVista(page: import("@playwright/test").Page): Promise<number> {
+  const vb = await page.getByRole("img", { name: "Mapa de competencias" }).getAttribute("viewBox");
+  return Number(vb?.split(/\s+/)[2] ?? 0);
+}
+
+test("G8 · se hace zoom con dos dedos, en las dos direcciones", async ({ page, qa }) => {
+  qa.step("entrar y esperar al mapa");
+  await entrar(page);
+  await expect(page.getByRole("img", { name: "Mapa de competencias" })).toBeVisible();
+
+  const inicial = await anchuraVista(page);
+  expect(inicial, "el mapa no llegó a encuadrarse").toBeGreaterThan(0);
+
+  qa.step("separar los dedos acerca");
+  await pellizcar(page, 1.8);
+  const cerca = await anchuraVista(page);
+  expect(cerca, `separar los dedos no acercó: ${inicial} → ${cerca}`).toBeLessThan(inicial * 0.95);
+
+  qa.step("juntarlos aleja");
+  await pellizcar(page, 0.5);
+  const lejos = await anchuraVista(page);
+  expect(lejos, `juntar los dedos no alejó: ${cerca} → ${lejos}`).toBeGreaterThan(cerca * 1.05);
+});
+
+test("G9 · el grafo no se puede perder por mucho que arrastres", async ({ page, qa }) => {
+  qa.step("entrar y esperar al mapa");
+  await entrar(page);
+  await expect(page.getByRole("img", { name: "Mapa de competencias" })).toBeVisible();
+
+  qa.step("arrastrar hasta el infinito en las cuatro direcciones");
+  // Cada arrastre es de una pantalla larga y se repiten: sin tope, esto deja el grafo a kilómetros.
+  for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]] as const) {
+    for (let i = 0; i < 4; i++) {
+      await page.mouse.move(195, 420);
+      await page.mouse.down();
+      await page.mouse.move(195 + dx * 340, 420 + dy * 700, { steps: 6 });
+      await page.mouse.up();
+    }
+  }
+
+  qa.step("sigue habiendo estrellas dentro de la pantalla");
+  const dentro = await page.evaluate(() => {
+    const w = document.documentElement.clientWidth;
+    const h = document.documentElement.clientHeight;
+    return [...document.querySelectorAll(".mapa-nodo")].filter((n) => {
+      const c = n.getBoundingClientRect();
+      return c.right > 0 && c.left < w && c.bottom > 0 && c.top < h;
+    }).length;
+  });
+  expect(dentro, "se perdió el grafo: no queda ni una estrella en pantalla").toBeGreaterThan(0);
+});
+
+test("G10 · «Centrar» devuelve el encuadre", async ({ page, qa }) => {
+  qa.step("entrar y esperar al mapa");
+  await entrar(page);
+  const mapa = page.getByRole("img", { name: "Mapa de competencias" });
+  await expect(mapa).toBeVisible();
+  const inicial = await mapa.getAttribute("viewBox");
+
+  qa.step("acercarse y moverse de sitio");
+  await pellizcar(page, 2);
+  await page.mouse.move(195, 420);
+  await page.mouse.down();
+  await page.mouse.move(80, 260, { steps: 6 });
+  await page.mouse.up();
+  expect(await mapa.getAttribute("viewBox")).not.toBe(inicial);
+
+  qa.step("pulsar Centrar");
+  await page.getByRole("button", { name: "Centrar" }).click();
+  await expect
+    .poll(() => mapa.getAttribute("viewBox"), { message: "«Centrar» no devolvió el encuadre" })
+    .toBe(inicial);
+});
+
 test("G7 · tocar una estrella no pinta el recuadro del navegador, y el teclado sigue viendo el foco", async ({
   page,
   qa,
