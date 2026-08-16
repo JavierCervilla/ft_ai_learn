@@ -14,6 +14,7 @@ import {
   ciclos,
   desbloqueaA,
   estadoDe,
+  faltanPara,
   inalcanzables,
   type Problema,
   validar,
@@ -341,6 +342,47 @@ export const casos: Caso[] = [
   },
 
   // --- Radar (V4) ---------------------------------------------------------------------------------
+  {
+    nombre: "un bloqueado sabe decir qué le falta, y sólo lo que toca ahora",
+    ejecutar() {
+      const g = grafoValido(); // a → b → c
+      // Sin nada hecho, `c` está bloqueado por `b`. **No** debe nombrar a `a`: es el prerequisito de su
+      // prerequisito, y enseñar la cadena entera es ruido — el siguiente paso real es el directo.
+      const faltanC = faltanPara(g, "c", new Set());
+      igual(faltanC.length, 1, "c debería listar un solo prerequisito directo");
+      igual(faltanC[0]?.id, "b", "c depende de b, no de a");
+
+      // Y tirando del hilo: `b` sí nombra a `a`. Así es como la hoja deja recorrer la cadena.
+      igual(faltanPara(g, "b", new Set())[0]?.id, "a", "b debería nombrar a a");
+
+      // Con el prerequisito hecho, no falta nada: vale igual como pregunta y como estado.
+      igual(faltanPara(g, "b", new Set(["a"])).length, 0, "con a hecho, b no está bloqueado");
+      igual(faltanPara(g, "a", new Set()).length, 0, "a no tiene prerequisitos");
+
+      // Devuelve NODOS, no ids: la hoja necesita el título para poder enseñar algo legible.
+      afirmar(
+        typeof faltanC[0]?.title === "string" && faltanC[0].title.length > 0,
+        "faltanPara debe devolver nodos con su título, no ids sueltos",
+      );
+    },
+  },
+  {
+    nombre: "un prerequisito que no existe no se pinta como un hueco",
+    ejecutar() {
+      // Contenido roto: lo caza la regla 2 de `validar`, pero mientras tanto la pantalla no puede
+      // enseñar el id crudo de un nodo fantasma como si fuera algo que la persona pueda ir a hacer.
+      const g = grafoValido();
+      g.nodes.push(nodo({ id: "z", prerequisites: ["fantasma", "a"] }));
+      const faltan = faltanPara(g, "z", new Set());
+      igual(faltan.length, 1, "el fantasma debería caerse de la lista");
+      igual(faltan[0]?.id, "a", "sólo queda el prerequisito que existe de verdad");
+      igual(
+        faltanPara(g, "no-existe", new Set()).length,
+        0,
+        "un nodo inexistente no falla, no falta",
+      );
+    },
+  },
   {
     nombre: "el radar tapa en 100 y añadir nodos no baja el de nadie",
     ejecutar() {

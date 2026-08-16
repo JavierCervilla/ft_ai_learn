@@ -309,6 +309,26 @@ jobs:
           cd ..
           kill %1
 
+      # La hoja del nodo (K1-K8 de FTAI-E.2). Paso propio por la razón de siempre: el código de
+      # bootstrap es de un solo uso y el `beforeAll` del paso anterior ya se lo gastó, así que
+      # correrlos juntos daría un rojo **del entorno** y no de lo que se prueba.
+      - name: Recorridos de la hoja del nodo (K1-K8) en 390 px
+        run: |
+          deno run -A server/src/main.ts &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8000/health && break || sleep 1; done
+
+          deno eval "
+            const p = (await import('npm:postgres@3.4.5')).default(Deno.env.get('DATABASE_URL'));
+            await p\`truncate user_progress, invitation, user_invite_quota, session, account, \"user\" cascade\`;
+            await p.end();
+          "
+          CODIGO=$(deno task invitar:bootstrap | tail -1)
+
+          cd webapp
+          CODIGO_BOOTSTRAP="$CODIGO" npx playwright test tests/e2e/hoja.spec.ts
+          cd ..
+          kill %1
+
       # Trinquete adversario **de interfaz**: los ocho recorridos que estuvieron en rojo tras el pase
       # de `qa-adversario` sobre FTAI-D.2 (doble clic en revocar, lista congelada tras un fallo,
       # código pegado con un espacio, cupo quemado en un correo inválido, identidad cruzada entre

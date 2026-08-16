@@ -81,10 +81,16 @@ export function Mapa({
   grafo,
   completados,
   alTocarNodo,
+  enfocado = null,
+  tapado = 0,
 }: {
   grafo: Grafo;
   completados: ReadonlySet<string>;
   alTocarNodo: (id: string) => void;
+  /** Nodo que la hoja está mostrando, si hay alguna abierta. */
+  enfocado?: string | null;
+  /** Fracción de la pantalla que tapa la hoja, de 0 a 1. */
+  tapado?: number;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [vista, setVista] = useState<Vista | null>(null);
@@ -196,6 +202,32 @@ export function Mapa({
     globalThis.addEventListener("resize", encuadrar);
     return () => globalThis.removeEventListener("resize", encuadrar);
   }, [encuadrar]);
+
+  /**
+   * La cámara aparta al sujeto de detrás del panel.
+   *
+   * Cuando se abre la hoja, la estrella que tocaste puede quedar justo debajo — y entonces la hoja
+   * habla de algo que no ves. Es el movimiento de cámara de cualquier juego al abrir un panel, y aquí
+   * cuesta cuatro líneas porque el encuadre ya es un estado.
+   *
+   * Se desplaza **sólo si hace falta**: si la estrella ya está en la franja libre, moverla sería quitar
+   * a la persona el mapa mental que acaba de hacerse. Y pasa por `acotar()`, que es lo que impide que
+   * apartar la estrella se lleve el grafo fuera de la pantalla.
+   */
+  useEffect(() => {
+    const svg = svgRef.current;
+    const puesto = enfocado ? porId.get(enfocado) : null;
+    if (!svg || !puesto || tapado <= 0) return;
+    setVista((v) => {
+      if (!v) return v;
+      const libre = 1 - tapado;
+      // Dónde cae la estrella dentro del encuadre, en fracción de alto (0 arriba, 1 abajo).
+      const donde = (puesto.y - v.y) / v.h;
+      const objetivo = libre / 2;
+      if (donde > 0.06 && donde < libre - 0.06) return v;
+      return acotar({ ...v, y: puesto.y - objetivo * v.h });
+    });
+  }, [enfocado, tapado, porId, acotar]);
 
   // --- Desplazar y acercar ----------------------------------------------------------------------
 
