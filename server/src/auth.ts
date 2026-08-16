@@ -80,7 +80,25 @@ export function crearAuth({ sql, secreto, baseUrl }: OpcionesAuth) {
      * protección que depende de una variable de ambiente es una protección que desaparece sin que
      * cambie una línea de código, y que no se ve leyendo este fichero.
      */
-    rateLimit: { enabled: true, window: 60, max: 20 },
+    /**
+     * El techo se puede subir por entorno, **igual que `REGISTRO_MAX_POR_IP` en FTAI-D.3** y por la
+     * misma razón: una suite de recorridos hace en un minuto lo que una persona hace en una tarde.
+     *
+     * Y hay un motivo más gordo, que costó tres trayectorias descubrir: este despliegue **no resuelve
+     * la IP del cliente**, así que el límite cae a un **cubo compartido por todo el mundo** (Better
+     * Auth lo avisa al arrancar). Con 20 por minuto para *todos*, agotarlo no necesita un atacante —
+     * basta gente usando la app a la vez. El cliente ya no lee ese 429 como «no tienes sesión» (ver
+     * `NO_SE_SABE` en `webapp/src/api.ts`), pero la cifra sigue siendo baja para un cubo global.
+     *
+     * **Lo que NO se hace es apagarlo**: `enabled` sigue fijo a `true`, porque una protección que se
+     * quita con una variable de ambiente es una protección que desaparece sin que cambie una línea de
+     * código y sin que se vea leyendo este fichero.
+     */
+    rateLimit: {
+      enabled: true,
+      window: 60,
+      max: Number(Deno.env.get("AUTH_MAX_POR_MINUTO") ?? 20),
+    },
     /**
      * **El logger no repite los argumentos del error**, y ésa es la única razón de que exista.
      *

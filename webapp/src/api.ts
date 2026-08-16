@@ -68,6 +68,23 @@ async function pedir<T>(ruta: string, init: RequestInit = {}): Promise<T> {
 export const SIN_RED = 0;
 
 /**
+ * Los estados en los que **no sabemos** quién eres, que no es lo mismo que saber que no eres nadie.
+ *
+ * `SIN_RED` estaba desde D.2. El **429** se añadió tras diagnosticar el fallo intermitente que llevaba
+ * tres trayectorias contaminando la verificación local y que yo venía llamando «ruido del entorno»: el
+ * límite de peticiones de Better Auth **no puede resolver la IP del cliente** en este despliegue, así
+ * que cae a un **cubo compartido por todo el mundo** (lo avisa él mismo en el arranque). Al agotarse,
+ * `/api/auth/get-session` devuelve 429 y la app lo leía como «no hay sesión»: te enseñaba el formulario
+ * de acceso **estando dentro**.
+ *
+ * Es exactamente la familia que vigila A9 —un fallo que no es «no tienes sesión» leído como si lo
+ * fuera— y la regla del proyecto ya estaba escrita: *un estado que el programa no puede distinguir es
+ * un estado sobre el que va a mentir*. Con el cubo compartido no hace falta ni un atacante: basta gente
+ * usando la app a la vez.
+ */
+export const NO_SE_SABE = new Set<number>([SIN_RED, 429]);
+
+/**
  * El grafo de aprendizaje.
  *
  * Es **público**: no lleva el progreso de nadie, así que no necesita sesión ni se puede filtrar por él.
@@ -93,7 +110,7 @@ export async function sesionActual(): Promise<Sesion | null> {
     const s = await pedir<Sesion | null>("/api/auth/get-session");
     return s?.user ? s : null;
   } catch (fallo) {
-    if (fallo instanceof ErrorApi && fallo.estado === SIN_RED) throw fallo;
+    if (fallo instanceof ErrorApi && NO_SE_SABE.has(fallo.estado)) throw fallo;
     // Sin sesión la librería responde con un cuerpo vacío; eso no es un error que enseñar.
     return null;
   }

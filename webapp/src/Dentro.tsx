@@ -4,7 +4,7 @@ import { grafo as pedirGrafo, type Sesion } from "./api.ts";
 import { Mapa } from "./Mapa.tsx";
 import { Cuenta } from "./Cuenta.tsx";
 import { ALTURA_HOJA, HojaNodo } from "./HojaNodo.tsx";
-import { abrirNodo, cerrarNodo, useNodoAbierto } from "./rutas.ts";
+import { irA, useRuta, volver } from "./rutas.ts";
 
 /**
  * El progreso llega en **E.3**. Hasta entonces el mapa y la hoja dibujan el estado inicial de verdad —
@@ -27,8 +27,6 @@ const COMPLETADOS: ReadonlySet<string> = new Set();
  * y tienen un motivo concreto —sin entrada de historial, el botón atrás de Android cierra la app en
  * vez de cerrar lo que tengas abierto—. Añadirlas aquí sería adelantar trabajo sin su razón.
  */
-type Pantalla = { donde: "mapa" } | { donde: "cuenta" };
-
 export function Dentro({ sesion, alSalir, alCambiarSesion }: {
   sesion: Sesion;
   alSalir: () => void;
@@ -41,12 +39,21 @@ export function Dentro({ sesion, alSalir, alCambiarSesion }: {
    */
   alCambiarSesion: (s: Sesion | null) => void;
 }) {
-  const [pantalla, setPantalla] = useState<Pantalla>({ donde: "mapa" });
-  // El nodo abierto vive en la URL, no en un `useState`: ver `rutas.ts` para por qué (el atrás de
-  // Android). `tapado` es cuánto de la pantalla ocupa la hoja, que es lo que el mapa necesita saber
-  // para apartar la estrella de detrás.
-  const abierto = useNodoAbierto();
-  const [tapado, setTapado] = useState<number>(ALTURA_HOJA.baja);
+  // **Las tres pantallas viven en la URL**, no en un `useState`. Ver `rutas.ts`: si algo se abre y no
+  // deja entrada de historial, el atrás de Android no lo cierra — cierra la app. Al principio sólo la
+  // hoja era ruta y la cuenta no, y `qa-adversario` reprodujo que media solución en una pila de
+  // historial es una pila incoherente.
+  const ruta = useRuta();
+  const abierto = ruta.donde === "nodo" ? ruta.id : null;
+  // La altura vive aquí y no en la hoja: así la hoja no se remonta al cambiar de nodo y su región
+  // `aria-live` sobrevive para poder anunciar. Ver el comentario de `alta` en `HojaNodo.tsx`.
+  const [alta, setAlta] = useState(false);
+
+  /** Abrir un nodo **siempre** vuelve a la altura baja: la hoja es del nodo que estás mirando. */
+  const abrir = (id: string) => {
+    setAlta(false);
+    irA({ donde: "nodo", id });
+  };
   const [grafo, setGrafo] = useState<Grafo | null>(null);
   const [fallo, setFallo] = useState<string | null>(null);
 
@@ -70,12 +77,12 @@ export function Dentro({ sesion, alSalir, alCambiarSesion }: {
     };
   }, []);
 
-  if (pantalla.donde === "cuenta") {
+  if (ruta.donde === "cuenta") {
     return (
       <div className="flex min-h-full flex-col">
         <button
           type="button"
-          onClick={() => setPantalla({ donde: "mapa" })}
+          onClick={volver}
           className="self-start px-6 py-4 text-sm text-[var(--color-tenue)] underline underline-offset-4"
         >
           ← Al mapa
@@ -97,7 +104,7 @@ export function Dentro({ sesion, alSalir, alCambiarSesion }: {
         </h1>
         <button
           type="button"
-          onClick={() => setPantalla({ donde: "cuenta" })}
+          onClick={() => irA({ donde: "cuenta" })}
           className="pointer-events-auto min-h-11 px-2 text-sm text-[var(--color-tenue)] underline underline-offset-4"
         >
           {sesion.user.name}
@@ -110,20 +117,20 @@ export function Dentro({ sesion, alSalir, alCambiarSesion }: {
             <Mapa
               grafo={grafo}
               completados={COMPLETADOS}
-              alTocarNodo={(id) => abrirNodo(id, abierto !== null)}
+              alTocarNodo={abrir}
               enfocado={abierto}
-              tapado={nodo ? tapado : 0}
+              tapado={nodo ? (alta ? ALTURA_HOJA.alta : ALTURA_HOJA.baja) : 0}
             />
             {nodo && (
               <HojaNodo
-                key={nodo.id}
                 grafo={grafo}
                 nodo={nodo}
                 estado={estados.get(nodo.id) ?? "locked"}
                 completados={COMPLETADOS}
-                alAbrirOtro={(id) => abrirNodo(id, true)}
-                alCerrar={cerrarNodo}
-                alCambiarAltura={setTapado}
+                alta={alta}
+                alAbrirOtro={abrir}
+                alCerrar={volver}
+                alCambiarAltura={setAlta}
               />
             )}
           </>

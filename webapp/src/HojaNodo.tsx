@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { type EstadoNodo, faltanPara, type Grafo, type Nodo } from "../../core/src/mod.ts";
 
 /**
@@ -29,6 +29,7 @@ export function HojaNodo({
   nodo,
   estado,
   completados,
+  alta,
   alAbrirOtro,
   alCerrar,
   alCambiarAltura,
@@ -37,20 +38,19 @@ export function HojaNodo({
   nodo: Nodo;
   estado: EstadoNodo;
   completados: ReadonlySet<string>;
+  /**
+   * En qué altura está. **Vive en `Dentro` y no aquí** por dos motivos que resultaron ser el mismo:
+   * al cambiar de nodo hay que volver a la baja, y hacerlo remontando la hoja con `key` destruía la
+   * región `aria-live` —una región que nace con su contenido dentro **no anuncia nada**, así que el
+   * atributo estaba puesto y el efecto que lo justifica no ocurría nunca. Lo midió `qa-adversario`.
+   * Con la altura arriba, la hoja no se remonta, la región vive y el reseteo pasa a ser lo que
+   * siempre debió ser: una línea en el manejador que abre el nodo.
+   */
+  alta: boolean;
   alAbrirOtro: (id: string) => void;
   alCerrar: () => void;
-  alCambiarAltura: (fraccion: number) => void;
+  alCambiarAltura: (alta: boolean) => void;
 }) {
-  // Al cambiar de nodo, la hoja vuelve a la altura baja y al principio del texto. No hace falta un
-  // efecto que lo resetee: `Dentro` la remonta con `key={nodo.id}`, así que el estado nace limpio y el
-  // scroll también. Un efecto que llama a `setState` para deshacer lo que el render acaba de hacer es
-  // un render de más y una fuente de parpadeos — el linter lo veta, y con razón.
-  const [alta, setAlta] = useState(false);
-
-  useEffect(() => {
-    alCambiarAltura(alta ? ALTURA_HOJA.alta : ALTURA_HOJA.baja);
-  }, [alta, alCambiarAltura]);
-
   const faltan = faltanPara(grafo, nodo.id, completados);
   const bloqueado = estado === "locked";
 
@@ -67,7 +67,7 @@ export function HojaNodo({
       */}
       <button
         type="button"
-        onClick={() => setAlta((v) => !v)}
+        onClick={() => alCambiarAltura(!alta)}
         aria-expanded={alta}
         className="flex w-full items-center justify-center px-6 pt-3 pb-1"
       >
@@ -98,7 +98,7 @@ export function HojaNodo({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 pt-4 pb-8">
+      <div key={nodo.id} className="flex-1 overflow-y-auto px-6 pt-4 pb-8">
         {bloqueado
           ? (
             /*
@@ -209,17 +209,25 @@ export function HojaNodo({
  * hasta que el contenido traiga un cuaderno.
  */
 function Cuaderno({ nodo }: { nodo: Nodo }) {
-  const [copiado, setCopiado] = useState(false);
+  const [copia, setCopia] = useState<"quieto" | "hecho" | "fallo">("quieto");
+  const fuentes = nodo.resources.map((r) => r.url).join("\n");
 
+  /**
+   * Si el portapapeles no está, **se dice y se enseñan las fuentes**.
+   *
+   * Antes el `catch` hacía `setCopiado(false)` — devolver el botón al estado en el que ya estaba, o
+   * sea **no cambiar ni un carácter de la pantalla** mientras el párrafo seguía diciendo «con las
+   * fuentes en el portapapeles… pégalas». `qa-adversario` lo reprodujo y midió que el escenario es
+   * real: sobre un origen sin TLS `navigator.clipboard` ni existe. Y como en Fase 0 **ningún nodo tiene
+   * cuaderno**, éste no es el camino de repuesto: es *el* camino, así que fallar en silencio tumba
+   * entero el «un nodo sin cuaderno sigue siendo plenamente usable».
+   */
   const copiarFuentes = async () => {
-    const fuentes = nodo.resources.map((r) => r.url).join("\n");
     try {
       await navigator.clipboard.writeText(fuentes);
-      setCopiado(true);
+      setCopia("hecho");
     } catch {
-      // Sin permiso de portapapeles no se finge que fue bien: se dice, que es la regla de esta app
-      // para cualquier fallo (Aroma §13.4). El texto sigue estando a la vista más abajo.
-      setCopiado(false);
+      setCopia("fallo");
     }
   };
 
@@ -242,12 +250,26 @@ function Cuaderno({ nodo }: { nodo: Nodo }) {
         disabled={nodo.resources.length === 0}
         className="min-h-11 self-start rounded-md border border-[var(--color-borde)] px-4 text-sm"
       >
-        {copiado ? "Fuentes copiadas" : "Crea el tuyo: copiar las fuentes"}
+        {copia === "hecho" ? "Fuentes copiadas" : "Crea el tuyo: copiar las fuentes"}
       </button>
-      <p className="text-xs leading-relaxed text-[var(--color-tenue)]">
-        Con las fuentes en el portapapeles, crea un cuaderno en tu cuenta y pégalas: es tuyo, con tu
-        cuota, y puedes añadir lo que quieras encima.
-      </p>
+      {copia === "fallo"
+        ? (
+          <div role="alert" className="flex flex-col gap-2">
+            <p className="text-sm leading-relaxed text-[var(--color-alerta)]">
+              Tu navegador no ha dejado copiar. Aquí las tienes para copiarlas a mano:
+            </p>
+            {/* La salida honesta: si la máquina no puede copiar, que al menos se pueda seleccionar. */}
+            <pre className="overflow-x-auto rounded-md border border-[var(--color-borde)] p-3 font-[family-name:var(--font-mono)] text-xs leading-relaxed">
+              {fuentes}
+            </pre>
+          </div>
+        )
+        : (
+          <p className="text-xs leading-relaxed text-[var(--color-tenue)]">
+            Con las fuentes en el portapapeles, crea un cuaderno en tu cuenta y pégalas: es tuyo, con tu
+            cuota, y puedes añadir lo que quieras encima.
+          </p>
+        )}
     </section>
   );
 }
