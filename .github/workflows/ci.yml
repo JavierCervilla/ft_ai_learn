@@ -129,6 +129,23 @@ jobs:
       # sólo vive aquí: la base se tira al acabar el job y no hay nada que rotar.
       BETTER_AUTH_SECRET: secreto-de-ci-de-treinta-y-dos-o-mas-caracteres
       BASE_URL: http://localhost:8000
+      # Una suite de recorridos hace en un minuto lo que una persona hace en una tarde, y el límite de
+      # Better Auth **cae a un cubo compartido** porque este despliegue no resuelve la IP del cliente:
+      # con los 20/min por defecto, los últimos pasos del job se comían 429 y la app —correctamente—
+      # decía «no se pudo comprobar tu sesión» donde el recorrido esperaba el mapa. Se sube el techo,
+      # no se apaga el límite. Mismo patrón que `REGISTRO_MAX_POR_IP` en FTAI-D.3.
+      AUTH_MAX_POR_MINUTO: "5000"
+      # Y el techo de **altas**, por lo mismo. El defecto son 10 por IP y minuto, y este PR llevó la
+      # suite adversaria de 8 a 19 recorridos: para cuando le toca el turno a `a2-entradas` ya se han
+      # emitido más de diez desde la misma IP, el alta se rechaza y la persona se queda en el
+      # formulario — el síntoma es «no aparece el mapa», que no se parece nada a un límite.
+      #
+      # Pasaba en CI y no en local **porque mi servidor de staging lo tenía aflojado desde FTAI-D.3** y
+      # no me di cuenta de que el job no. El defecto (10) es el que corre en producción y no se toca;
+      # el paso de A5 conserva su propio 500, más estricto, porque ese recorrido mide justo la defensa.
+      # Y ningún recorrido aserta que la undécima alta se rechace, así que subirlo aquí no desactiva
+      # ninguna comprobación — comprobado antes de tocarlo, que es lo que toca antes de subir un límite.
+      REGISTRO_MAX_POR_IP: "5000"
     steps:
       - uses: actions/checkout@v5
       - uses: denoland/setup-deno@v2
@@ -306,6 +323,26 @@ jobs:
 
           cd webapp
           CODIGO_BOOTSTRAP="$CODIGO" npx playwright test tests/e2e/mapa.spec.ts
+          cd ..
+          kill %1
+
+      # La hoja del nodo (K1-K8 de FTAI-E.2). Paso propio por la razón de siempre: el código de
+      # bootstrap es de un solo uso y el `beforeAll` del paso anterior ya se lo gastó, así que
+      # correrlos juntos daría un rojo **del entorno** y no de lo que se prueba.
+      - name: Recorridos de la hoja del nodo (K1-K8) en 390 px
+        run: |
+          deno run -A server/src/main.ts &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:8000/health && break || sleep 1; done
+
+          deno eval "
+            const p = (await import('npm:postgres@3.4.5')).default(Deno.env.get('DATABASE_URL'));
+            await p\`truncate user_progress, invitation, user_invite_quota, session, account, \"user\" cascade\`;
+            await p.end();
+          "
+          CODIGO=$(deno task invitar:bootstrap | tail -1)
+
+          cd webapp
+          CODIGO_BOOTSTRAP="$CODIGO" npx playwright test tests/e2e/hoja.spec.ts
           cd ..
           kill %1
 

@@ -81,10 +81,16 @@ export function Mapa({
   grafo,
   completados,
   alTocarNodo,
+  enfocado = null,
+  tapado = 0,
 }: {
   grafo: Grafo;
   completados: ReadonlySet<string>;
   alTocarNodo: (id: string) => void;
+  /** Nodo que la hoja está mostrando, si hay alguna abierta. */
+  enfocado?: string | null;
+  /** Fracción de la pantalla que tapa la hoja, de 0 a 1. */
+  tapado?: number;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [vista, setVista] = useState<Vista | null>(null);
@@ -197,6 +203,32 @@ export function Mapa({
     return () => globalThis.removeEventListener("resize", encuadrar);
   }, [encuadrar]);
 
+  /**
+   * La cámara aparta al sujeto de detrás del panel.
+   *
+   * Cuando se abre la hoja, la estrella que tocaste puede quedar justo debajo — y entonces la hoja
+   * habla de algo que no ves. Es el movimiento de cámara de cualquier juego al abrir un panel, y aquí
+   * cuesta cuatro líneas porque el encuadre ya es un estado.
+   *
+   * Se desplaza **sólo si hace falta**: si la estrella ya está en la franja libre, moverla sería quitar
+   * a la persona el mapa mental que acaba de hacerse. Y pasa por `acotar()`, que es lo que impide que
+   * apartar la estrella se lleve el grafo fuera de la pantalla.
+   */
+  useEffect(() => {
+    const svg = svgRef.current;
+    const puesto = enfocado ? porId.get(enfocado) : null;
+    if (!svg || !puesto || tapado <= 0) return;
+    setVista((v) => {
+      if (!v) return v;
+      const libre = 1 - tapado;
+      // Dónde cae la estrella dentro del encuadre, en fracción de alto (0 arriba, 1 abajo).
+      const donde = (puesto.y - v.y) / v.h;
+      const objetivo = libre / 2;
+      if (donde > 0.06 && donde < libre - 0.06) return v;
+      return acotar({ ...v, y: puesto.y - objetivo * v.h });
+    });
+  }, [enfocado, tapado, porId, acotar]);
+
   // --- Desplazar y acercar ----------------------------------------------------------------------
 
   /**
@@ -210,9 +242,23 @@ export function Mapa({
    */
   const punteros = useRef(new Map<number, { x: number; y: number }>());
 
+  /**
+   * A partir de cuántos píxeles un puntero deja de ser un toque y pasa a ser un arrastre.
+   *
+   * Existe por un fallo que encontró `qa-adversario` y que ningún recorrido veía: capturar el puntero
+   * en el `pointerdown` hace que Chromium entregue el **click de compatibilidad** al elemento que tiene
+   * la captura —el `<svg>`— y no al `<g role="button">` de la estrella. Con el dedo daba igual, porque
+   * el toque genera su propio camino; **con el ratón, tocar una estrella no abría nada**: en un portátil
+   * el mapa entero era decorativo. Invisible para la suite porque los ocho recorridos tocaban sólo con
+   * `touchscreen.tap()` — la misma familia de aserto que no mira.
+   *
+   * Capturar sólo cuando el puntero **ya se ha movido** conserva lo que la captura compra (que el
+   * arrastre siga funcionando si el dedo se sale del SVG) y devuelve el click a quien le toca.
+   */
+  const UMBRAL_ARRASTRE = 4;
+
   const alBajar = (e: React.PointerEvent<SVGSVGElement>) => {
     punteros.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const alMover = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -220,6 +266,15 @@ export function Mapa({
     if (!svg || !vista || !punteros.current.has(e.pointerId)) return;
 
     const antes = [...punteros.current.values()];
+    const previo = punteros.current.get(e.pointerId)!;
+    if (
+      !e.currentTarget.hasPointerCapture(e.pointerId) &&
+      Math.hypot(e.clientX - previo.x, e.clientY - previo.y) < UMBRAL_ARRASTRE &&
+      punteros.current.size < 2
+    ) {
+      return; // todavía es un toque, no un arrastre: no se captura ni se mueve el encuadre
+    }
+    e.currentTarget.setPointerCapture(e.pointerId);
     punteros.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const ahora = [...punteros.current.values()];
 
@@ -281,10 +336,27 @@ export function Mapa({
         `game-ui-web` lo cuenta como *crítico* («dónde estoy»), no como decoración. Llama a
         `encuadrar()`, que es la función que ya hacía exactamente esto y no estaba cableada a nada.
       */}
+      {/*
+        Sube por encima de la hoja cuando hay una abierta. `qa-adversario` reprodujo que la hoja lo
+        enterraba en sus dos alturas: `isVisible()` seguía diciendo `true` —no estaba oculto, estaba
+        tapado— y el toque caía en la hoja. Resultado: tras acercarte a una estrella y abrir su hoja, la
+        única vuelta al encuadre exigía cerrarla, y el panel que promete no ser modal se comportaba como
+        si lo fuera. El desplazamiento va en una clase acotada y no en un `style` en línea, que el gate
+        veta con razón.
+      */}
       <button
         type="button"
         onClick={encuadrar}
-        className="fixed right-4 bottom-6 z-10 min-h-11 min-w-11 rounded-full border border-[var(--color-borde)] bg-[var(--color-panel)]/80 px-4 text-sm text-[var(--color-tenue)]"
+        className={`fixed z-30 min-h-11 min-w-11 rounded-full border border-[var(--color-borde)] bg-[var(--color-panel)]/80 px-4 text-sm text-[var(--color-tenue)] ${
+          // Con la hoja alta se va **a la izquierda**: arriba a la derecha vive la «×» de la hoja, y el
+          // primer intento de este arreglo la tapaba — cambiar un control enterrado por otro enterrado
+          // no es arreglarlo. Lo cazaron los propios recorridos K5/K6 al no poder cerrar la hoja.
+          tapado > 0.6
+            ? "top-20 left-4"
+            : tapado > 0
+            ? "right-4 bottom-[calc(45%+1.5rem)]"
+            : "right-4 bottom-6"
+        }`}
       >
         Centrar
       </button>

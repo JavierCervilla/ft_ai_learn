@@ -229,6 +229,36 @@ export function estadoDe(
   return estados;
 }
 
+/**
+ * Qué le falta a un nodo para dejar de estar bloqueado.
+ *
+ * **Un `locked` que no sabe explicarse es una mentira**: el núcleo conoce la respuesta, así que la
+ * pantalla no tiene derecho a decir sólo «bloqueado». Es el bug de usabilidad más común de un árbol de
+ * habilidades y aquí no hace falta cometerlo.
+ *
+ * Devuelve **sólo los prerequisitos directos** que aún no están hechos, no la cadena entera. Es
+ * deliberado: enseñarle a alguien los siete nodos de una rama porque le faltan dos es ruido, y el
+ * siguiente paso real es el directo. Quien quiera seguir tirando del hilo toca ese prerequisito y ve
+ * los suyos — la hoja los hace navegables justo para eso.
+ *
+ * Vacío significa que el nodo **no** está bloqueado, así que sirve igual como pregunta que como estado.
+ */
+export function faltanPara(
+  grafo: Grafo,
+  id: string,
+  completados: ReadonlySet<string>,
+): Nodo[] {
+  const nodo = grafo.nodes.find((n) => n.id === id);
+  if (!nodo) return [];
+  const porId = new Map(grafo.nodes.map((n) => [n.id, n]));
+  return nodo.prerequisites
+    .filter((pre) => !completados.has(pre))
+    // Un prerequisito que no existe es un contenido roto (regla 2 de `validar`), no un nodo que
+    // enseñar: se cae aquí en vez de pintar un hueco con su id crudo.
+    .map((pre) => porId.get(pre))
+    .filter((n): n is Nodo => n !== undefined);
+}
+
 /** Los nodos que se pueden empezar ahora mismo. Es la pregunta que hace la pantalla. */
 export function disponibles(grafo: Grafo, completados: ReadonlySet<string>): Nodo[] {
   const estados = estadoDe(grafo, completados);

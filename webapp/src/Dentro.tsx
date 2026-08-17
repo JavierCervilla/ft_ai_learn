@@ -1,8 +1,20 @@
-import { useEffect, useState } from "react";
-import type { Grafo } from "../../core/src/mod.ts";
+import { useEffect, useMemo, useState } from "react";
+import { estadoDe, type Grafo } from "../../core/src/mod.ts";
 import { grafo as pedirGrafo, type Sesion } from "./api.ts";
 import { Mapa } from "./Mapa.tsx";
 import { Cuenta } from "./Cuenta.tsx";
+import { ALTURA_HOJA, HojaNodo } from "./HojaNodo.tsx";
+import { irA, useRuta, volver } from "./rutas.ts";
+
+/**
+ * El progreso llega en **E.3**. Hasta entonces el mapa y la hoja dibujan el estado inicial de verdad —
+ * nada completado— en vez de inventarse uno de mentira para que se vea bonito.
+ *
+ * Es una constante del módulo y no un `new Set()` en línea porque un conjunto nuevo en cada render
+ * invalidaría los `useMemo` que dependen de él, y entonces el mapa recalcularía la disposición entera
+ * cada vez que se abre una hoja.
+ */
+const COMPLETADOS: ReadonlySet<string> = new Set();
 
 /**
  * Lo que ves cuando estás dentro.
@@ -15,8 +27,6 @@ import { Cuenta } from "./Cuenta.tsx";
  * y tienen un motivo concreto —sin entrada de historial, el botón atrás de Android cierra la app en
  * vez de cerrar lo que tengas abierto—. Añadirlas aquí sería adelantar trabajo sin su razón.
  */
-type Pantalla = { donde: "mapa" } | { donde: "cuenta" };
-
 export function Dentro({ sesion, alSalir, alCambiarSesion }: {
   sesion: Sesion;
   alSalir: () => void;
@@ -29,9 +39,31 @@ export function Dentro({ sesion, alSalir, alCambiarSesion }: {
    */
   alCambiarSesion: (s: Sesion | null) => void;
 }) {
-  const [pantalla, setPantalla] = useState<Pantalla>({ donde: "mapa" });
+  // **Las tres pantallas viven en la URL**, no en un `useState`. Ver `rutas.ts`: si algo se abre y no
+  // deja entrada de historial, el atrás de Android no lo cierra — cierra la app. Al principio sólo la
+  // hoja era ruta y la cuenta no, y `qa-adversario` reprodujo que media solución en una pila de
+  // historial es una pila incoherente.
+  const ruta = useRuta();
+  const abierto = ruta.donde === "nodo" ? ruta.id : null;
+  // La altura vive aquí y no en la hoja: así la hoja no se remonta al cambiar de nodo y su región
+  // `aria-live` sobrevive para poder anunciar. Ver el comentario de `alta` en `HojaNodo.tsx`.
+  const [alta, setAlta] = useState(false);
+
+  /** Abrir un nodo **siempre** vuelve a la altura baja: la hoja es del nodo que estás mirando. */
+  const abrir = (id: string) => {
+    setAlta(false);
+    irA({ donde: "nodo", id });
+  };
   const [grafo, setGrafo] = useState<Grafo | null>(null);
   const [fallo, setFallo] = useState<string | null>(null);
+
+  const estados = useMemo(
+    () => (grafo ? estadoDe(grafo, COMPLETADOS) : new Map()),
+    [grafo],
+  );
+  // Un id en la URL que no existe en el grafo **no abre nada**: la URL es entrada de fuera, y no puede
+  // dar por hecho que nombra algo nuestro.
+  const nodo = grafo && abierto ? grafo.nodes.find((n) => n.id === abierto) ?? null : null;
 
   useEffect(() => {
     let vivo = true;
@@ -45,12 +77,12 @@ export function Dentro({ sesion, alSalir, alCambiarSesion }: {
     };
   }, []);
 
-  if (pantalla.donde === "cuenta") {
+  if (ruta.donde === "cuenta") {
     return (
       <div className="flex min-h-full flex-col">
         <button
           type="button"
-          onClick={() => setPantalla({ donde: "mapa" })}
+          onClick={volver}
           className="self-start px-6 py-4 text-sm text-[var(--color-tenue)] underline underline-offset-4"
         >
           ← Al mapa
@@ -72,7 +104,7 @@ export function Dentro({ sesion, alSalir, alCambiarSesion }: {
         </h1>
         <button
           type="button"
-          onClick={() => setPantalla({ donde: "cuenta" })}
+          onClick={() => irA({ donde: "cuenta" })}
           className="pointer-events-auto min-h-11 px-2 text-sm text-[var(--color-tenue)] underline underline-offset-4"
         >
           {sesion.user.name}
@@ -81,13 +113,27 @@ export function Dentro({ sesion, alSalir, alCambiarSesion }: {
 
       {grafo
         ? (
-          <Mapa
-            grafo={grafo}
-            // El progreso llega en E.3. Hasta entonces el mapa dibuja el estado inicial de verdad —
-            // nada completado— en vez de inventarse uno de mentira para que se vea bonito.
-            completados={new Set()}
-            alTocarNodo={() => {}}
-          />
+          <>
+            <Mapa
+              grafo={grafo}
+              completados={COMPLETADOS}
+              alTocarNodo={abrir}
+              enfocado={abierto}
+              tapado={nodo ? (alta ? ALTURA_HOJA.alta : ALTURA_HOJA.baja) : 0}
+            />
+            {nodo && (
+              <HojaNodo
+                grafo={grafo}
+                nodo={nodo}
+                estado={estados.get(nodo.id) ?? "locked"}
+                completados={COMPLETADOS}
+                alta={alta}
+                alAbrirOtro={abrir}
+                alCerrar={volver}
+                alCambiarAltura={setAlta}
+              />
+            )}
+          </>
         )
         : (
           <main className="flex min-h-full items-center justify-center px-6 text-center">

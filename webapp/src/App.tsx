@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { ErrorApi, type Sesion, sesionActual, SIN_RED } from "./api.ts";
+import { ErrorApi, NO_SE_SABE, type Sesion, sesionActual } from "./api.ts";
 import { Acceso } from "./Acceso.tsx";
 import { Dentro } from "./Dentro.tsx";
+import { reiniciarRuta } from "./rutas.ts";
 
 /**
  * Quién ve qué.
@@ -33,7 +34,9 @@ export function App() {
       const s = await sesionActual();
       return s ? { fase: "dentro", sesion: s } : { fase: "fuera" };
     } catch (fallo) {
-      if (fallo instanceof ErrorApi && fallo.estado === SIN_RED) return { fase: "sinRed" };
+      // Cualquier estado en el que NO sabemos quién eres cae aquí: sin red, o el 429 del límite
+      // de peticiones. Lo que no puede pasar es enseñar el formulario de acceso a quien está dentro.
+      if (fallo instanceof ErrorApi && NO_SE_SABE.has(fallo.estado)) return { fase: "sinRed" };
       return { fase: "fuera" };
     }
   }, []);
@@ -77,9 +80,10 @@ export function App() {
   if (estado.fase === "sinRed") {
     return (
       <main className="mx-auto flex min-h-full w-full max-w-md flex-col justify-center gap-4 px-6 text-center">
-        <h1 className="font-[family-name:var(--font-display)] text-3xl">Sin conexión</h1>
+        <h1 className="font-[family-name:var(--font-display)] text-3xl">No se pudo comprobar</h1>
         <p className="text-[var(--color-tenue)]">
-          No se pudo comprobar tu sesión. No has salido: vuelve a intentarlo cuando tengas cobertura.
+          No hemos podido saber si tu sesión sigue viva. <strong>No has salido</strong>: puede ser la
+          cobertura o que el servidor esté cargado. Inténtalo otra vez.
         </p>
         <button
           type="button"
@@ -96,14 +100,29 @@ export function App() {
   }
 
   if (estado.fase === "fuera") {
-    return <Acceso alEntrar={(sesion) => setEstado({ fase: "dentro", sesion })} />;
+    return (
+      <Acceso
+        alEntrar={(sesion) => {
+          // Quien acaba de entrar empieza en el mapa, no donde se quedó la sesión anterior de esta
+          // pestaña. Ver `reiniciarRuta` en `rutas.ts`.
+          reiniciarRuta();
+          setEstado({ fase: "dentro", sesion });
+        }}
+      />
+    );
   }
 
   return (
     <Dentro
       sesion={estado.sesion}
-      alSalir={() => setEstado({ fase: "fuera" })}
-      alCambiarSesion={(s) => setEstado(s ? { fase: "dentro", sesion: s } : { fase: "fuera" })}
+      alSalir={() => {
+        reiniciarRuta();
+        setEstado({ fase: "fuera" });
+      }}
+      alCambiarSesion={(s) => {
+        reiniciarRuta();
+        setEstado(s ? { fase: "dentro", sesion: s } : { fase: "fuera" });
+      }}
     />
   );
 }

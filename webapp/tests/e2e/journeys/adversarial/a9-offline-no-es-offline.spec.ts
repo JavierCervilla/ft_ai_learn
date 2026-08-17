@@ -76,6 +76,14 @@ test("A9 · sin red y en caliente, no se le dice a quien tiene sesión que está
   qa.step("entrar desde el navegador con una invitación");
   await unirseDesdeElNavegador(page, `a9-calor-${sello()}@ejemplo.test`, "Calor");
 
+  // Desde FTAI-E.2 la pantalla vive en la URL, así que **la ruta sobrevive a la recarga** — que es el
+  // punto entero de tener rutas. `unirseDesdeElNavegador` deja la pestaña en `#/cuenta`, así que se
+  // vuelve al mapa antes de recargar. Es andamiaje, no la invariante: lo que este recorrido vigila es
+  // que sin red no se le diga «estás fuera» a quien tiene la sesión viva, y eso no se toca.
+  qa.step("volver al mapa antes de recargar (la ruta ahora persiste, por diseño)");
+  await page.getByRole("button", { name: "Al mapa" }).click();
+  await expect(page.getByRole("img", { name: "Mapa de competencias" })).toBeVisible();
+
   qa.step("una recarga ONLINE con el SW ya al mando: ahora sí se cachean los assets");
   await page.waitForFunction(() => !!navigator.serviceWorker.controller, undefined, {
     timeout: 15000,
