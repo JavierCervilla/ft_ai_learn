@@ -135,6 +135,17 @@ jobs:
       # decía «no se pudo comprobar tu sesión» donde el recorrido esperaba el mapa. Se sube el techo,
       # no se apaga el límite. Mismo patrón que `REGISTRO_MAX_POR_IP` en FTAI-D.3.
       AUTH_MAX_POR_MINUTO: "5000"
+      # Y el techo de **altas**, por lo mismo. El defecto son 10 por IP y minuto, y este PR llevó la
+      # suite adversaria de 8 a 19 recorridos: para cuando le toca el turno a `a2-entradas` ya se han
+      # emitido más de diez desde la misma IP, el alta se rechaza y la persona se queda en el
+      # formulario — el síntoma es «no aparece el mapa», que no se parece nada a un límite.
+      #
+      # Pasaba en CI y no en local **porque mi servidor de staging lo tenía aflojado desde FTAI-D.3** y
+      # no me di cuenta de que el job no. El defecto (10) es el que corre en producción y no se toca;
+      # el paso de A5 conserva su propio 500, más estricto, porque ese recorrido mide justo la defensa.
+      # Y ningún recorrido aserta que la undécima alta se rechace, así que subirlo aquí no desactiva
+      # ninguna comprobación — comprobado antes de tocarlo, que es lo que toca antes de subir un límite.
+      REGISTRO_MAX_POR_IP: "5000"
     steps:
       - uses: actions/checkout@v5
       - uses: denoland/setup-deno@v2
