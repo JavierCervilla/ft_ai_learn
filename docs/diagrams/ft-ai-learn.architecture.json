@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ft_ai_learn — el Holy Graph de IA que se aprueba con evidencia",
+    "output": "ft-ai-learn.architecture.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "camino-principal",
+        "label": "Camino principal: estudiar y avanzar",
+        "focus": ["estudiante", "webapp", "api", "postgres"],
+        "note": "El estudiante abre la PWA, la API sirve el grafo y su progreso, y el estado dura en Postgres."
+      },
+      {
+        "id": "identidad",
+        "label": "Identidad y círculo cerrado",
+        "focus": ["auth", "api", "postgres", "estudiante"],
+        "note": "Better Auth lleva la sesión; el alta sólo existe por invitación y la autorización va por recurso."
+      },
+      {
+        "id": "contenido",
+        "label": "El contenido, del YAML a la base",
+        "focus": ["contenido", "arranque", "postgres", "nucleo"],
+        "note": "El grafo es YAML versionado: cada arranque migra y lo siembra de forma idempotente."
+      }
+    ]
+  },
+  "components": [
+    { "id": "github", "type": "external", "label": "Evidencia en Git", "sublabel": "repos del estudiante", "pos": [40, 110], "size": [150, 60] },
+    { "id": "cuadernos", "type": "external", "label": "Cuadernos públicos", "sublabel": "Gemini · Colab", "pos": [280, 110], "size": [150, 60] },
+    { "id": "auth", "type": "security", "label": "Better Auth", "sublabel": "cookie de sesión", "pos": [520, 110], "size": [150, 64], "tag": "alta sólo por invitación" },
+
+    { "id": "estudiante", "type": "external", "label": "Estudiante", "sublabel": "móvil, sesiones de 15 min", "pos": [40, 300], "size": [150, 60] },
+    { "id": "webapp", "type": "frontend", "label": "Webapp PWA", "sublabel": "Vite + React + Tailwind", "pos": [280, 300], "size": [150, 64], "tag": "instalable · armazón offline" },
+    { "id": "api", "type": "backend", "label": "API Deno + Oak", "sublabel": ":8000 y estáticos", "pos": [520, 300], "size": [150, 64], "tag": "/api/graph · /api/progress" },
+    { "id": "postgres", "type": "database", "label": "Postgres 17", "sublabel": "grafo, progreso, sesiones", "pos": [760, 300], "size": [150, 60] },
+
+    { "id": "nucleo", "type": "backend", "label": "Núcleo @ftai/core", "sublabel": "TypeScript sin E/S", "pos": [280, 490], "size": [150, 64], "tag": "reglas del grafo y radar" },
+    { "id": "arranque", "type": "backend", "label": "Arranque del contenedor", "sublabel": "migrar, sembrar, servir", "pos": [520, 490], "size": [150, 64], "tag": "docker-entrypoint.sh" },
+    { "id": "contenido", "type": "database", "label": "Contenido del grafo", "sublabel": "content/fase-0.yaml", "pos": [760, 490], "size": [150, 60] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Imagen Docker en Dokploy: Deno sirve la API y el bundle ya construido", "wraps": ["auth", "api", "postgres", "arranque", "contenido"] },
+    { "kind": "security-group", "label": "Círculo cerrado: sesión por cookie y autorización por recurso", "wraps": ["auth", "api"] }
+  ],
+  "connections": [
+    { "id": "abre-la-app", "from": "estudiante", "to": "webapp", "label": "abre la PWA", "variant": "emphasis", "labelDy": -24 },
+    { "id": "llamada-api", "from": "webapp", "to": "api", "label": "HTTPS · JSON", "variant": "emphasis", "labelDy": -24 },
+    { "id": "consulta-sql", "from": "api", "to": "postgres", "label": "SQL", "variant": "emphasis", "labelDy": -24 },
+    { "id": "entrega-evidencia", "from": "estudiante", "to": "github", "label": "empuja la evidencia", "variant": "dashed", "fromSide": "top", "toSide": "bottom" },
+    { "id": "abre-cuaderno", "from": "webapp", "to": "cuadernos", "label": "abre el cuaderno", "variant": "dashed", "fromSide": "top", "toSide": "bottom" },
+    { "id": "sesion", "from": "auth", "to": "api", "label": "sesión por cookie", "variant": "security", "fromSide": "bottom", "toSide": "top", "labelDy": 24 },
+    { "id": "identidades", "from": "auth", "to": "postgres", "label": "usuarios e invitaciones", "variant": "security", "fromSide": "right", "toSide": "top" },
+    { "id": "nucleo-cliente", "from": "nucleo", "to": "webapp", "label": "desbloqueo optimista", "fromSide": "top", "toSide": "bottom" },
+    { "id": "nucleo-servidor", "from": "nucleo", "to": "api", "label": "desbloqueo autoritativo", "fromSide": "right", "toSide": "bottom" },
+    { "id": "migra-siembra", "from": "arranque", "to": "postgres", "label": "migra y siembra", "fromSide": "top", "toSide": "bottom" },
+    { "id": "carga-yaml", "from": "contenido", "to": "arranque", "label": "grafo en YAML", "labelDy": -24 }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Stack", "items": ["Deno 2 + Oak sirve la API y el bundle estático de la webapp", "Vite + React + Tailwind: PWA instalable, con el armazón cacheado para el metro", "Núcleo TypeScript compartido: navegador y servidor son dos adaptadores de la misma regla"] },
+    { "dot": "emerald", "title": "Datos", "items": ["Postgres 17 guarda grafo, progreso, sesiones e invitaciones", "El contenido es YAML versionado y se siembra en cada arranque, idempotente", "El estado `available` se deriva con el núcleo; nunca se guarda"] },
+    { "dot": "rose", "title": "Despliegue y seguridad", "items": ["Imagen de dos etapas: Node construye el bundle y se queda fuera; Deno lo sirve", "Las migraciones corren antes del servidor: si fallan, el contenedor muere", "Better Auth con alta sólo por invitación; los secretos, sólo por entorno"] }
+  ]
+}
